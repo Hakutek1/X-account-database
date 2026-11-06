@@ -123,7 +123,10 @@ jobs:
           curl --silent --show-error --fail http://127.0.0.1:4173/ >/dev/null
           curl --silent --show-error --fail http://127.0.0.1:4173/api/site-version \
             | node --input-type=module -e 'let data=""; for await (const part of process.stdin) data += part; const result = JSON.parse(data); if (result.version !== 105 || result.label !== "Ver.1.05" || result.sourceCommit !== process.env.SOURCE_COMMIT) process.exit(1); console.log(JSON.stringify(result));'
-          APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private
+          if ! APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private; then
+            cat "$RUNNER_TEMP/xstats-dev-private.log"
+            exit 1
+          fi
           run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0'
           APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private prepare
           run_d1 "SELECT 'PREPARED|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions WHERE session_id='xstats-public-shared' AND account_id='excel:parodys.l.a') AS result" | grep -F 'PREPARED|0|0|0|0|0'
