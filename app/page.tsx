@@ -1964,7 +1964,7 @@ export default function Home() {
           <div className="input-footer"><span className="input-count">{uniqueValues(parseLines(accountInput)).length} / {MAX_ACCOUNTS} アカウント</span><button type="button" className="primary-button" onClick={collect} disabled={isLoading}>{isLoading ? <><span className="button-spinner" />取得中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button></div>
 
           {notice && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
-        </section> : {readMode === "public" ? <section className="public-readonly-card panel-card"><p className="eyebrow">PUBLIC DASHBOARD</p><h2>共有データを閲覧中</h2><p>取得データとグラフは公開されています。アカウント追加とExcel操作は管理者のみ利用できます。</p></section> : <section className="public-readonly-card panel-card"><p className="eyebrow">PRIVATE DASHBOARD</p><h2>閲覧には管理者ログインが必要です</h2><p>このサイトは非公開モードです。管理者ログイン後にアカウントデータを表示します。</p></section>}}
+        </section> : readMode === "public" ? <section className="public-readonly-card panel-card"><p className="eyebrow">PUBLIC DASHBOARD</p><h2>共有データを閲覧中</h2><p>取得データとグラフは公開されています。アカウント追加とExcel操作は管理者のみ利用できます。</p></section> : <section className="public-readonly-card panel-card"><p className="eyebrow">PRIVATE DASHBOARD</p><h2>閲覧には管理者ログインが必要です</h2><p>このサイトは非公開モードです。管理者ログイン後にアカウントデータを表示します。</p></section>}
         {notice && !isAdmin && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
       </section>
 
