@@ -99,6 +99,10 @@ jobs:
           SITE_VERSION_NUMBER=105
           SITE_SOURCE_COMMIT=$SOURCE_COMMIT
           XSTATS_ADMIN_KEY=preview-only-key
+MICROSOFT_CLIENT_ID=preview-client-id
+MICROSOFT_CLIENT_SECRET=preview-client-secret
+MICROSOFT_OWNER_EMAIL=owner@example.invalid
+MICROSOFT_TOKEN_ENCRYPTION_KEY=preview-only-token-encryption-key
           EOF
           server_pid=""
           stop_server() {
@@ -138,6 +142,10 @@ jobs:
           SITE_VERSION_NUMBER=105
           SITE_SOURCE_COMMIT=$SOURCE_COMMIT
           XSTATS_ADMIN_KEY=preview-only-key
+MICROSOFT_CLIENT_ID=preview-client-id
+MICROSOFT_CLIENT_SECRET=preview-client-secret
+MICROSOFT_OWNER_EMAIL=owner@example.invalid
+MICROSOFT_TOKEN_ENCRYPTION_KEY=preview-only-token-encryption-key
           XSTATS_READ_MODE=public
           EOF
           start_server public 4174

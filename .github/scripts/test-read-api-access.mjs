@@ -61,13 +61,15 @@ for (const item of reads) {
   if (response.status !== 403) {
     const serialized = JSON.stringify(body);
     assert.doesNotMatch(serialized, /access_token|refresh_token|client_secret|XSTATS_ADMIN_KEY/i, `${item.path} must not expose credentials`);
+    assert.doesNotMatch(serialized, /excel:parodys\.l\.a/i, `${item.path} must not expose a legacy account ID`);
     if (item.path === "/api/history") {
       assert.equal("deletedAccountIds" in body, false);
       assert.equal("importIssues" in body, false);
       assert.ok(body.runs?.every((run) => !("source_summary" in run)), "history must not expose internal import metadata");
     }
     if (item.path === "/api/microsoft/status" && mode === "public") {
-      assert.equal(body.configured, false);
+      assert.equal(body.configured, true);
+      assert.equal(body.connected, false);
       assert.equal("user" in body, false);
     }
   }
@@ -93,8 +95,16 @@ for (const item of protectedWrites) {
 }
 const microsoftLogin = await request("/api/microsoft/login");
 assert.equal(microsoftLogin.response.status, 403, "OAuth initiation remains administrator-only");
+const anonymousCallback = await request("/api/microsoft/callback?code=must-not-be-used&state=must-not-be-used");
+assert.equal(anonymousCallback.response.status, 302, "OAuth callback requires an administrator session");
+const anonymousCallbackUrl = new URL(anonymousCallback.response.headers.get("location"), base);
+assert.equal(anonymousCallbackUrl.searchParams.get("message"), "管理者のみMicrosoft連携を利用できます。");
 
 const cookie = await adminCookie();
+const invalidCallback = await request("/api/microsoft/callback?code=must-not-be-used&state=must-not-be-used", { cookie });
+assert.equal(invalidCallback.response.status, 302, "OAuth callback must validate state before exchanging a code");
+const invalidCallbackUrl = new URL(invalidCallback.response.headers.get("location"), base);
+assert.equal(invalidCallbackUrl.searchParams.get("message"), "Microsoft認証の確認に失敗しました。もう一度接続してください。");
 for (const item of reads) {
   const { response, body } = await request(item.path, { cookie });
   assert.equal(response.status, item.publicStatus, `authenticated GET ${item.path}: ${JSON.stringify(body)}`);

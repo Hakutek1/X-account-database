@@ -17,13 +17,13 @@ function redirectWithMessage(request: Request, message: string) {
 }
 
 export async function GET(request: Request) {
+  if (!(await isAdminRequest(request))) return redirectWithMessage(request, "管理者のみMicrosoft連携を利用できます。");
   const config = microsoftRuntimeConfig();
   if (!config) return redirectWithMessage(request, "Microsoft連携の環境設定が未完了です。");
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const session = getSharedSession();
-  if (!(await isAdminRequest(request))) return redirectWithMessage(request, "管理者のみMicrosoft連携を利用できます。");
   const expectedState = cookieValue(request, "xstats_ms_state");
   if (!code || !state || !expectedState || state !== expectedState || !state.startsWith(`${session.id}.`)) return redirectWithMessage(request, "Microsoft認証の確認に失敗しました。もう一度接続してください。");
   try {

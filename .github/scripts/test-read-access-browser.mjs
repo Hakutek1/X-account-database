@@ -63,13 +63,17 @@ try {
   await privatePage.goto(origin, { waitUntil: "domcontentloaded" });
   await statusRequested;
   await privatePage.waitForTimeout(100);
-  assert.equal(await privatePage.getByText("保存済みの秘密アカウント", { exact: true }).count(), 0, "cached account rows must not render before auth status returns");
-  assert.equal(await privatePage.getByText("secret-handle-that-must-not-flash", { exact: true }).count(), 0, "cached account input must not render before auth status returns");
+  const cachedPrivateValuesVisible = await privatePage.locator("input, textarea").evaluateAll((elements) => elements.some((element) => {
+    const value = element.value ?? "";
+    return value.includes("保存済みの秘密アカウント") || value.includes("secret-handle-that-must-not-flash") || value.includes("秘密の表示名");
+  }));
+  assert.equal(cachedPrivateValuesVisible, false, "cached account values must not render before auth status returns");
   await privatePage.screenshot({ path: join(outputDirectory, "private-auth-pending.png"), fullPage: true });
 
   statusRelease();
   await privatePage.getByRole("heading", { name: "閲覧には管理者ログインが必要です" }).waitFor();
-  assert.equal(await privatePage.getByText("保存済みの秘密アカウント", { exact: true }).count(), 0, "private unauthenticated view must stay empty");
+  const privateRowsBeforeLogin = await privatePage.locator(".results-table input[aria-label=\"private_fixtureの表示名\"]").count();
+  assert.equal(privateRowsBeforeLogin, 0, "private unauthenticated view must stay empty");
   const clearedStorage = await privatePage.evaluate(() => JSON.parse(localStorage.getItem("x-account-stats-dashboard-v2") ?? "{}"));
   assert.equal("rows" in clearedStorage, false, "cached rows should be removed after private mode is confirmed");
   assert.equal("accountInput" in clearedStorage, false, "cached account input should be removed after private mode is confirmed");
@@ -78,11 +82,14 @@ try {
   await privatePage.getByRole("button", { name: "管理者ログイン" }).click();
   await privatePage.getByLabel("管理者キー").fill("preview-only-key");
   await privatePage.getByRole("button", { name: "認証" }).click();
-  await privatePage.getByText("保護されたアカウント", { exact: true }).waitFor();
-  assert.equal(await privatePage.getByText("保存済みの秘密アカウント", { exact: true }).count(), 0, "server history must replace stale local rows");
+  const protectedName = privatePage.locator(".results-table input[aria-label=\"private_fixtureの表示名\"]");
+  await protectedName.waitFor({ state: "visible" });
+  assert.equal(await protectedName.inputValue(), "保護されたアカウント", "authenticated private view should show server history");
+  const stalePrivateValuesVisible = await privatePage.locator("input, textarea").evaluateAll((elements) => elements.some((element) => (element.value ?? "").includes("秘密の表示名")));
+  assert.equal(stalePrivateValuesVisible, false, "server history must replace stale local rows");
   await privatePage.getByRole("button", { name: "管理者ログアウト" }).click();
   await privatePage.getByText("閲覧には管理者ログインが必要です").waitFor();
-  assert.equal(await privatePage.getByText("保護されたアカウント", { exact: true }).count(), 0, "logout must clear protected history from the screen");
+  assert.equal(await privatePage.locator(".results-table input[aria-label=\"private_fixtureの表示名\"]").count(), 0, "logout must clear protected history from the screen");
   await privatePage.close();
 
   const publicPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -91,7 +98,9 @@ try {
   await publicPage.route("**/api/site-version", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ version: 105, label: "Ver.1.05" }) }));
   await publicPage.goto(origin, { waitUntil: "networkidle" });
   await publicPage.getByRole("heading", { name: "共有データを閲覧中" }).waitFor();
-  await publicPage.getByText("保護されたアカウント", { exact: true }).waitFor();
+  const publicName = publicPage.locator(".results-table input[aria-label=\"private_fixtureの表示名\"]");
+  await publicName.waitFor({ state: "visible" });
+  assert.equal(await publicName.inputValue(), "保護されたアカウント", "public mode should render history without login");
   await publicPage.screenshot({ path: join(outputDirectory, "public-dashboard.png"), fullPage: true });
   assert.equal(await publicPage.getByRole("heading", { name: "調べたいアカウントを追加" }).count(), 0, "public visitors must not see administrator write controls");
   await publicPage.close();
