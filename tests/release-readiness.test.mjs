@@ -12,6 +12,8 @@ test("license and release docs state the noncommercial attribution terms", async
   assert.match(readme, /非商用/);
   assert.match(readme, /OSI認定/);
   assert.match(readme, /Required Notice/);
+  assert.match(readme, /\.dev\.vars\.example/);
+  assert.doesNotMatch(readme, /\.env\.example/);
 });
 
 test("setup examples are tracked while per-installation configuration stays ignored", async () => {
