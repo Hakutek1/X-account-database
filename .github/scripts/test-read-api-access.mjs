@@ -70,7 +70,7 @@ for (const item of reads) {
     if (item.path === "/api/microsoft/status" && mode === "public") {
       assert.equal(body.configured, true);
       assert.equal(body.connected, false);
-      assert.equal("user" in body, false);
+      assert.equal(body.user, null);
     }
   }
 }
