@@ -1,12 +1,24 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
-const { d1, r2 } = hostingConfig;
+function loadHostingConfig(): { d1?: string; r2?: string } {
+  try {
+    return JSON.parse(readFileSync(resolve(process.cwd(), ".openai/hosting.json"), "utf8")) as { d1?: string; r2?: string };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // The public repository deliberately omits Sites project metadata. Keep a
+    // local-only D1 binding so the source still builds and can be tested.
+    return { d1: "DB" };
+  }
+}
+
+const { d1, r2 } = loadHostingConfig();
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
@@ -20,6 +32,7 @@ const localBindingConfig = {
           binding: d1,
           database_name: "site-creator-d1",
           database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          migrations_dir: "./drizzle",
         },
       ]
     : [],

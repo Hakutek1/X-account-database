@@ -66,7 +66,7 @@ type HistoryRow = {
 type LatestCollection = { fetched_at: string; success_count: number; error_count: number };
 type HistoryResponse = { runs?: { id: string; fetched_at: string }[]; rows?: HistoryRow[]; latestCollection?: LatestCollection | null; error?: string };
 type CollectResponse = { rows?: AccountRow[]; warnings?: string[]; error?: string };
-type AdminStatus = { configured?: boolean; isAdmin?: boolean; error?: string };
+type AdminStatus = { configured?: boolean; isAdmin?: boolean; readMode?: "private" | "public"; error?: string };
 type SiteVersionResponse = { version?: number; label?: string };
 type ExportRow = {
   fetchedAt: string;
@@ -1179,6 +1179,8 @@ export default function Home() {
   const [notice, setNotice] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [readMode, setReadMode] = useState<"private" | "public">("private");
+  const [isReadAccessReady, setIsReadAccessReady] = useState(false);
   const [adminLoginOpen, setAdminLoginOpen] = useState(false);
   const [adminKeyInput, setAdminKeyInput] = useState("");
   const [isAdminLoggingIn, setIsAdminLoggingIn] = useState(false);
@@ -1241,16 +1243,48 @@ export default function Home() {
   const avatarSyncFingerprint = useRef("");
   const chartExportRef = useRef<(() => Promise<void>) | null>(null);
 
+  const clearCachedAccountData = () => {
+    setRows([]);
+    setHistoryRows([]);
+    setLatestCollection(null);
+    setAccountInput("");
+    setSelectedHandles([]);
+    setDisplayNameOverrides({});
+    setLegendColors({});
+    chartSelectionInitialized.current = false;
+    try {
+      const saved = window.localStorage.getItem(DASHBOARD_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Record<string, unknown>;
+        for (const key of ["accountInput", "rows", "selectedHandles", "displayNameOverrides", "legendColors"]) delete parsed[key];
+        window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(parsed));
+      }
+    } catch {
+      window.localStorage.removeItem(DASHBOARD_STORAGE_KEY);
+    }
+  };
+
   const loadAdminStatus = async () => {
     try {
       const response = await fetch(`${window.location.origin}/api/admin/status`, { credentials: "same-origin", cache: "no-store" });
       const payload = (await response.json().catch(() => ({}))) as AdminStatus;
+      const mode = response.ok && payload.readMode === "public" ? "public" : "private";
       const authenticated = Boolean(response.ok && payload.isAdmin);
+      setReadMode(mode);
       setIsAdmin(authenticated);
       if (!authenticated) setActiveTab("results");
+      if (mode === "public" || authenticated) await loadHistory();
+      else {
+        clearCachedAccountData();
+        setHistoryError(null);
+      }
     } catch {
+      setReadMode("private");
       setIsAdmin(false);
       setActiveTab("results");
+      clearCachedAccountData();
+    } finally {
+      setIsReadAccessReady(true);
     }
   };
 
@@ -1284,6 +1318,7 @@ export default function Home() {
       setAdminKeyInput("");
       setAdminLoginOpen(false);
       setNotice({ tone: "success", message: "管理者モードに切り替えました。" });
+      await loadHistory();
     } catch (error) {
       setNotice({ tone: "error", message: error instanceof Error ? error.message : "管理者ログインに失敗しました。" });
     } finally {
@@ -1296,7 +1331,9 @@ export default function Home() {
     setIsAdmin(false);
     setActiveTab("results");
     setAdminLoginOpen(false);
-    setNotice({ tone: "info", message: "公開閲覧モードに戻しました。" });
+    clearCachedAccountData();
+    setNotice({ tone: "info", message: "管理者セッションを終了しました。" });
+    if (readMode === "public") await loadHistory();
   };
 
   const loadHistory = async () => {
@@ -1313,6 +1350,8 @@ export default function Home() {
             const previous = current.find((item) => item.id === row.account_id || item.handle.toLowerCase() === row.handle.toLowerCase());
             return { id: row.account_id, handle: row.handle, displayName: row.display_name, avatarUrl: row.avatar_url ?? previous?.avatarUrl ?? null, followers: row.followers, following: row.following, posts: row.posts, joined: row.joined ?? previous?.joined ?? null, fetchedAt: row.fetched_at, status: "ok" as const, accountStatus: row.account_status ?? previous?.accountStatus ?? "active" };
           }));
+      } else {
+        setRows([]);
       }
       const historicalHandles = uniqueValues((payload.rows ?? []).map((row) => row.handle.toLowerCase())).slice(0, 8);
       setSelectedHandles((current) => {
@@ -1327,23 +1366,24 @@ export default function Home() {
     }
   };
 
-  /* eslint-disable react-hooks/set-state-in-effect -- localStorage hydration intentionally restores the previous browser session. */
+  /* eslint-disable react-hooks/set-state-in-effect -- wait for the server read policy before restoring account-specific preferences. */
   useEffect(() => {
+    if (!isReadAccessReady) return;
+    const canReadAccountData = readMode === "public" || isAdmin;
     try {
       const saved = window.localStorage.getItem(DASHBOARD_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as PersistedDashboardState;
-        if (typeof parsed.accountInput === "string") setAccountInput(parsed.accountInput);
-        if (Array.isArray(parsed.rows)) setRows(parsed.rows.map((row) => ({ ...row, accountStatus: row.accountStatus ?? "active" })));
-        if (Array.isArray(parsed.selectedHandles)) {
+        if (canReadAccountData && typeof parsed.accountInput === "string") setAccountInput(parsed.accountInput);
+        if (canReadAccountData && Array.isArray(parsed.selectedHandles)) {
           chartSelectionInitialized.current = true;
           setSelectedHandles(parsed.selectedHandles.filter((handle): handle is string => typeof handle === "string").map((handle) => handle.toLowerCase()));
         }
         if (Array.isArray(parsed.chartStatusFilter)) setChartStatusFilter(parsed.chartStatusFilter.filter((value): value is AccountStatus => isAccountStatus(value)));
         if (Array.isArray(parsed.statusFilter)) setStatusFilter(parsed.statusFilter.filter((value): value is StatusCategory => value === "active" || value === "ended" || value === "nonAlt"));
         if (parsed.theme === "light" || parsed.theme === "dark") setTheme(parsed.theme);
-        if (parsed.displayNameOverrides && typeof parsed.displayNameOverrides === "object") setDisplayNameOverrides(parsed.displayNameOverrides);
-        if (parsed.legendColors && typeof parsed.legendColors === "object") setLegendColors(parsed.legendColors);
+        if (canReadAccountData && parsed.displayNameOverrides && typeof parsed.displayNameOverrides === "object") setDisplayNameOverrides(parsed.displayNameOverrides);
+        if (canReadAccountData && parsed.legendColors && typeof parsed.legendColors === "object") setLegendColors(parsed.legendColors);
         if (typeof parsed.barColor === "string" && /^#[0-9a-f]{6}$/i.test(parsed.barColor)) setBarColor(parsed.barColor);
         if (typeof parsed.chartTitle === "string") setChartTitle(parsed.chartTitle);
         if (typeof parsed.chartTitleFontSize === "number" && parsed.chartTitleFontSize >= 6 && parsed.chartTitleFontSize <= 24) setChartTitleFontSize(parsed.chartTitleFontSize);
@@ -1364,24 +1404,20 @@ export default function Home() {
     } finally {
       setIsHydrated(true);
     }
-  }, []);
+  }, [isReadAccessReady, isAdmin, readMode]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    if (!isHydrated) return;
+    if (!isHydrated || !isReadAccessReady) return;
+    const canReadAccountData = readMode === "public" || isAdmin;
     try {
-      const state: PersistedDashboardState = { accountInput, rows, selectedHandles, statusFilter, chartStatusFilter, theme, displayNameOverrides, legendColors, barColor: barColor ?? undefined, chartTitle, chartTitleFontSize, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, showTrendLegend, logScale };
+      const state: PersistedDashboardState = { ...(canReadAccountData ? { accountInput, selectedHandles, displayNameOverrides, legendColors } : {}), statusFilter, chartStatusFilter, theme, barColor: barColor ?? undefined, chartTitle, chartTitleFontSize, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, showTrendLegend, logScale };
       window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(state));
     } catch {
       // A full or restricted localStorage should not block data collection.
     }
-  }, [accountInput, barColor, chartStatusFilter, chartTitle, chartTitleFontSize, compareLabelFontSize, displayNameOverrides, isHydrated, legendColors, logScale, markerOutlineColor, markerOutlineWidth, markerSize, rows, selectedHandles, showTrendLegend, statusFilter, theme, trendAxisFontSize, trendDateFontSize, trendLineWidth, trendValueFontSize, trendValueLabelColor]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => { void loadHistory(); }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  }, [accountInput, barColor, chartStatusFilter, chartTitle, chartTitleFontSize, compareLabelFontSize, displayNameOverrides, isHydrated, isReadAccessReady, isAdmin, legendColors, logScale, markerOutlineColor, markerOutlineWidth, markerSize, readMode, selectedHandles, showTrendLegend, statusFilter, theme, trendAxisFontSize, trendDateFontSize, trendLineWidth, trendValueFontSize, trendValueLabelColor]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1928,7 +1964,7 @@ export default function Home() {
           <div className="input-footer"><span className="input-count">{uniqueValues(parseLines(accountInput)).length} / {MAX_ACCOUNTS} アカウント</span><button type="button" className="primary-button" onClick={collect} disabled={isLoading}>{isLoading ? <><span className="button-spinner" />取得中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button></div>
 
           {notice && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
-        </section> : <section className="public-readonly-card panel-card"><p className="eyebrow">PUBLIC DASHBOARD</p><h2>共有データを閲覧中</h2><p>取得データとグラフは全ユーザーで共有されています。アカウント追加とExcel操作は管理者のみ利用できます。</p></section>}
+        </section> : readMode === "public" ? <section className="public-readonly-card panel-card"><p className="eyebrow">PUBLIC DASHBOARD</p><h2>共有データを閲覧中</h2><p>取得データとグラフは公開されています。アカウント追加とExcel操作は管理者のみ利用できます。</p></section> : <section className="public-readonly-card panel-card"><p className="eyebrow">PRIVATE DASHBOARD</p><h2>閲覧には管理者ログインが必要です</h2><p>このサイトは非公開モードです。管理者ログイン後にアカウントデータを表示します。</p></section>}
         {notice && !isAdmin && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
       </section>
 

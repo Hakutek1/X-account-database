@@ -1,4 +1,4 @@
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin, requireReadAccess } from "../../_shared";
 
 const TARGET_HANDLE = "nflf";
 const TARGET_DATE = "2026-07-25";
@@ -7,11 +7,7 @@ const NEXT_JST_DAY_START_UTC = "2026-07-25T15:00:00.000Z";
 
 type Candidate = { account_id: string; handle: string; display_name: string; snapshot_count: number; target_date_count: number; latest_fetched_at: string | null };
 
-async function findCandidates() {
-  await ensureSchema();
-  const db = getD1();
-  const session = getSharedSession();
-  await ensureSharedSession(db);
+async function findCandidates(db: D1Database = getD1(), session = getSharedSession()) {
   const result = await db.prepare(`
     SELECT account_id, MAX(handle) AS handle, MAX(display_name) AS display_name,
       COUNT(*) AS snapshot_count,
@@ -25,7 +21,7 @@ async function findCandidates() {
 }
 
 export async function GET(request: Request) {
-  const denied = await requireAdmin(request);
+  const denied = await requireReadAccess(request);
   if (denied) return denied;
   try { return json({ handle: TARGET_HANDLE, targetDate: TARGET_DATE, candidates: (await findCandidates()).rows }); }
   catch (error) { return json({ error: error instanceof Error ? error.message : "NFLFの重複データを確認できませんでした。" }, { status: 500 }); }
@@ -39,7 +35,11 @@ export async function POST(request: Request) {
     const removeAccountId = String(body.removeAccountId ?? "").trim();
     const keepAccountId = String(body.keepAccountId ?? "").trim();
     if (!removeAccountId || !keepAccountId || removeAccountId === keepAccountId) return json({ error: "削除対象と保持対象のアカウントIDを別々に指定してください。" }, { status: 400 });
-    const { db, session, rows } = await findCandidates();
+    await ensureSchema();
+    const db = getD1();
+    const session = getSharedSession();
+    await ensureSharedSession(db);
+    const { rows } = await findCandidates(db, session);
     const remove = rows.find((row) => row.account_id === removeAccountId);
     const keep = rows.find((row) => row.account_id === keepAccountId);
     if (!remove || !keep) return json({ error: "指定された2つのIDがNFLFの重複候補として確認できません。", candidates: rows }, { status: 409 });

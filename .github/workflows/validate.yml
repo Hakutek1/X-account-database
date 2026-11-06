@@ -22,7 +22,7 @@ jobs:
         run: npm ci
       - name: Confirm no known dependency vulnerabilities
         run: npm audit
-      - name: Apply 0013 to a disposable D1 and verify preserved data
+      - name: Apply 0013–0014 to a disposable D1 and verify preserved data
         shell: bash
         run: |
           set -euo pipefail
@@ -34,17 +34,18 @@ jobs:
           import pathlib
           import sys
           folder = pathlib.Path(sys.argv[1])
-          migrations = list(folder.glob("0013_*.sql"))
-          if len(migrations) != 1:
-              raise SystemExit(f"Expected one 0013 migration, found {len(migrations)}")
-          tag = migrations[0].stem
-          migrations[0].unlink()
+          migrations = sorted([*folder.glob("0013_*.sql"), *folder.glob("0014_*.sql")])
+          if len(migrations) != 2:
+              raise SystemExit(f"Expected 0013 and 0014 migrations, found {len(migrations)}")
+          tags = {migration.stem for migration in migrations}
+          for migration in migrations:
+              migration.unlink()
           journal_path = folder / "_journal.json"
           journal = json.loads(journal_path.read_text())
           old_count = len(journal["entries"])
-          journal["entries"] = [entry for entry in journal["entries"] if entry["tag"] != tag]
-          if len(journal["entries"]) != old_count - 1:
-              raise SystemExit("Expected exactly one 0013 journal entry")
+          journal["entries"] = [entry for entry in journal["entries"] if entry["tag"] not in tags]
+          if len(journal["entries"]) != old_count - 2:
+              raise SystemExit("Expected exactly the 0013 and 0014 journal entries")
           journal_path.write_text(json.dumps(journal))
           PY
           cat > "$RUNNER_TEMP/wrangler-before.jsonc" <<JSON
@@ -64,62 +65,97 @@ jobs:
           SQL
           npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-before.jsonc" --persist-to "$persist" --file "$RUNNER_TEMP/seed.sql"
           npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist"
-          output="$(npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist" --command "SELECT 'removed:xstats_schedules:' || COUNT(*) AS result FROM sqlite_master WHERE type='table' AND name='xstats_schedules' UNION ALL SELECT 'removed:xstats_watchlist:' || COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_watchlist' UNION ALL SELECT 'status:retained-account:' || status || ':' || joined_at FROM xstats_account_statuses WHERE session_id='d1-removal-test' UNION ALL SELECT 'history:history-account:2020-01-02' FROM xstats_daily_history WHERE id='history-row-1' AND account_id='history-account' AND date='2020-01-02' UNION ALL SELECT 'table:' || name FROM sqlite_master WHERE type='table' AND name IN ('xstats_sessions','xstats_runs','xstats_snapshots','xstats_account_statuses','xstats_daily_history','xstats_daily_history_meta','xstats_historical_account_exclusions','xstats_account_assets','xstats_import_mappings','xstats_import_issues','xstats_microsoft_tokens') ORDER BY result")"
+          output="$(npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist" --command "SELECT 'removed:xstats_schedules:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_schedules') || '|removed:xstats_watchlist:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_watchlist') || '|status:retained-account:' || COALESCE((SELECT status || ':' || joined_at FROM xstats_account_statuses WHERE session_id='d1-removal-test' AND account_id='retained-account'), 'missing') || '|history:' || (SELECT COUNT(*) FROM xstats_daily_history WHERE id='history-row-1' AND account_id='history-account' AND date='2020-01-02') || '|columns:avatar_url:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_snapshots') WHERE name='avatar_url') || ':avatar_data:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_account_assets') WHERE name='avatar_data') || '|tables:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('xstats_sessions','xstats_runs','xstats_snapshots','xstats_account_statuses','xstats_daily_history','xstats_daily_history_meta','xstats_historical_account_exclusions','xstats_account_assets','xstats_import_mappings','xstats_import_issues','xstats_microsoft_tokens')) AS result")"
           printf '%s\n' "$output"
-          for expected in 'removed:xstats_schedules:0' 'removed:xstats_watchlist:0' 'status:retained-account:suspended:2020-01-02' 'history:history-account:2020-01-02' 'table:xstats_sessions' 'table:xstats_runs' 'table:xstats_snapshots' 'table:xstats_account_statuses' 'table:xstats_daily_history' 'table:xstats_daily_history_meta' 'table:xstats_historical_account_exclusions' 'table:xstats_account_assets' 'table:xstats_import_mappings' 'table:xstats_import_issues' 'table:xstats_microsoft_tokens'; do
+          for expected in 'removed:xstats_schedules:0' 'removed:xstats_watchlist:0' 'status:retained-account:suspended:2020-01-02' 'history:1' 'columns:avatar_url:1:avatar_data:1' 'tables:11'; do
             printf '%s' "$output" | grep -F "$expected" >/dev/null || { echo "Missing D1 verification result: $expected"; exit 1; }
           done
       - name: Build and run the complete test suite
         run: npm test
-      - name: Start the application and verify its HTTP and version API
+      - name: Install Playwright and Chromium for read-access browser tests
+        run: |
+          npm install --no-save --package-lock=false playwright
+          npx playwright install --with-deps chromium
+      - name: Start the app and verify read access against a disposable D1
         shell: bash
         env:
           SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          mkdir -p .openai
+          cat > .openai/hosting.json <<'JSON'
+          {"d1":"DB"}
+          JSON
+          cat > "$RUNNER_TEMP/wrangler-api-test.jsonc" <<JSON
+          {"name":"site-creator-d1","compatibility_date":"2026-11-06","d1_databases":[{"binding":"DB","database_name":"site-creator-d1","database_id":"00000000-0000-4000-8000-000000000000","migrations_dir":"$GITHUB_WORKSPACE/drizzle"}]}
+          JSON
+          persist="$GITHUB_WORKSPACE/.wrangler/state"
+          run_d1() {
+            npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-api-test.jsonc" --persist-to "$persist" --command "$1"
+          }
+          npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-api-test.jsonc" --persist-to "$persist"
+          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0'
           cat > .dev.vars <<EOF
           SITE_VERSION_NUMBER=105
           SITE_SOURCE_COMMIT=$SOURCE_COMMIT
           XSTATS_ADMIN_KEY=preview-only-key
+          MICROSOFT_CLIENT_ID=preview-client-id
+          MICROSOFT_CLIENT_SECRET=preview-client-secret
+          MICROSOFT_OWNER_EMAIL=owner@example.invalid
+          MICROSOFT_TOKEN_ENCRYPTION_KEY=preview-only-token-encryption-key
           EOF
-          npm run dev -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/xstats-dev.log" 2>&1 &
-          server_pid=$!
-          echo "$server_pid" > "$RUNNER_TEMP/xstats-dev.pid"
-          for attempt in $(seq 1 60); do
-            if curl --silent --fail http://127.0.0.1:4173/ >/dev/null; then break; fi
-            if [ "$attempt" -eq 60 ]; then cat "$RUNNER_TEMP/xstats-dev.log"; exit 1; fi
-            sleep 2
-          done
+          server_pid=""
+          stop_server() {
+            if [ -n "$server_pid" ]; then
+              kill -TERM -- "-$server_pid" 2>/dev/null || true
+              wait "$server_pid" 2>/dev/null || true
+              server_pid=""
+            fi
+          }
+          trap stop_server EXIT
+          start_server() {
+            label="$1"
+            port="$2"
+            setsid npm run dev -- --host 127.0.0.1 --port "$port" > "$RUNNER_TEMP/xstats-dev-$label.log" 2>&1 &
+            server_pid=$!
+            for attempt in $(seq 1 60); do
+              if curl --silent --fail "http://127.0.0.1:$port/" >/dev/null; then return; fi
+              if [ "$attempt" -eq 60 ]; then cat "$RUNNER_TEMP/xstats-dev-$label.log"; exit 1; fi
+              sleep 2
+            done
+          }
+          start_server private 4173
           curl --silent --show-error --fail http://127.0.0.1:4173/ >/dev/null
           curl --silent --show-error --fail http://127.0.0.1:4173/api/site-version \
             | node --input-type=module -e 'let data=""; for await (const part of process.stdin) data += part; const result = JSON.parse(data); if (result.version !== 105 || result.label !== "Ver.1.05" || result.sourceCommit !== process.env.SOURCE_COMMIT) process.exit(1); console.log(JSON.stringify(result));'
-      - name: Install Playwright and Chromium for optional screenshots
-        id: playwright-install
-        continue-on-error: true
-        run: |
-          npm install --no-save --package-lock=false playwright
-          npx playwright install --with-deps chromium
-      - name: Capture desktop and mobile graph screens
-        id: preview-screenshots
-        if: steps.playwright-install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
+          if ! APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private; then
+            cat "$RUNNER_TEMP/xstats-dev-private.log"
+            exit 1
+          fi
+          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0'
+          APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private prepare
+          run_d1 "SELECT 'PREPARED|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions WHERE session_id='xstats-public-shared' AND account_id='excel:parodys.l.a') AS result" | grep -F 'PREPARED|0|0|0|0|0'
+          run_d1 "UPDATE xstats_sessions SET last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = 'xstats-public-shared'"
+          run_d1 "UPDATE xstats_daily_history_meta SET updated_at = '2000-01-01T00:00:00.000Z' WHERE session_id = 'xstats-public-shared'"
+          stop_server
+          cat > .dev.vars <<EOF
+          SITE_VERSION_NUMBER=105
+          SITE_SOURCE_COMMIT=$SOURCE_COMMIT
+          XSTATS_ADMIN_KEY=preview-only-key
+          MICROSOFT_CLIENT_ID=preview-client-id
+          MICROSOFT_CLIENT_SECRET=preview-client-secret
+          MICROSOFT_OWNER_EMAIL=owner@example.invalid
+          MICROSOFT_TOKEN_ENCRYPTION_KEY=preview-only-token-encryption-key
+          XSTATS_READ_MODE=public
+          EOF
+          start_server public 4174
           mkdir -p "$RUNNER_TEMP/xstats-preview"
-          SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/preview-screenshots.mjs
+          APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-api-access.mjs public
+          APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-access-browser.mjs
+          PREVIEW_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/preview-screenshots.mjs
+          run_d1 "SELECT 'READ_ONLY|' || (SELECT last_seen_at FROM xstats_sessions WHERE id = 'xstats-public-shared') || '|' || (SELECT updated_at FROM xstats_daily_history_meta WHERE session_id = 'xstats-public-shared') || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'READ_ONLY|2000-01-01T00:00:00.000Z|2000-01-01T00:00:00.000Z|0|0|0|0|0|0|0|0|0'
       - uses: actions/upload-artifact@v4
-        if: steps.preview-screenshots.outcome == 'success'
         with:
-          name: xstats-dashboard-screenshots
+          name: xstats-read-access-screenshots
           path: ${{ runner.temp }}/xstats-preview/*.png
           if-no-files-found: error
-      - name: Stop the local preview app
-        if: always()
-        shell: bash
-        run: |
-          if [ -f "$RUNNER_TEMP/xstats-dev.pid" ]; then
-            server_pid="$(cat "$RUNNER_TEMP/xstats-dev.pid")"
-            pkill -TERM -P "$server_pid" 2>/dev/null || true
-            kill -TERM "$server_pid" 2>/dev/null || true
-          fi

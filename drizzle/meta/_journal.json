@@ -99,6 +99,13 @@
       "when": 1793207562906,
       "tag": "0013_amazing_spyke",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1793941648770,
+      "tag": "0014_add_avatar_fields",
+      "breakpoints": true
     }
   ]
 }

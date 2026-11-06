@@ -32,7 +32,7 @@ test("public history returns collection freshness and performs only reads", asyn
     { run_id: "actual-run", fetched_at: "2026-10-30T03:00:00.000Z", account_id: "a1" },
     { run_id: "imported-run", fetched_at: "2020-01-01T03:00:00.000Z", account_id: "a1" },
   ];
-  const { database, queries } = makeDatabase({ runs, exclusions: [{ account_id: "deleted-a2" }] });
+  const { database, queries } = makeDatabase({ runs });
   const response = await buildPublicHistoryResponse(database, "shared", async () => rows);
 
   assert.deepEqual(response.latestCollection, {
@@ -43,9 +43,10 @@ test("public history returns collection freshness and performs only reads", asyn
   assert.deepEqual(response.rows, rows);
   assert.equal(response.runs[0].id, "imported-latest");
   assert.ok(response.runs.some((run) => run.id === "imported-run"));
-  assert.deepEqual(response.deletedAccountIds, ["deleted-a2"]);
+  assert.ok(response.runs.every((run) => !("source_summary" in run)), "internal import metadata must not be returned");
+  assert.equal("deletedAccountIds" in response, false);
   assert.equal("importIssues" in response, false);
-  assert.equal(queries.length, 2);
+  assert.equal(queries.length, 1);
   assert.ok(queries.every((query) => /^\s*SELECT\b/i.test(query)));
   assert.ok(queries.every((query) => !/xstats_import_issues/i.test(query)));
 });

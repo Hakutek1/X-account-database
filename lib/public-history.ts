@@ -34,10 +34,9 @@ export async function buildPublicHistoryResponse<Row extends PublicHistoryRow>(
   sessionId: string,
   loadRows: () => Promise<Row[]>,
 ) {
-  const [runs, rows, exclusions] = await Promise.all([
+  const [runs, rows] = await Promise.all([
     database.prepare("SELECT id, fetched_at, success_count, error_count, source_summary FROM xstats_runs WHERE session_id = ? ORDER BY fetched_at DESC").bind(sessionId).all<PublicRun>(),
     loadRows(),
-    database.prepare("SELECT account_id FROM xstats_historical_account_exclusions WHERE session_id = ?").bind(sessionId).all<{ account_id: string }>(),
   ]);
 
   const knownRunIds = new Set(runs.results.map((run) => run.id));
@@ -48,8 +47,18 @@ export async function buildPublicHistoryResponse<Row extends PublicHistoryRow>(
   ).values()];
 
   const latestCollectionRun = runs.results.find((run) => !isImportedRun(run.source_summary));
+  const publicRuns = [
+    ...runs.results.map((run) => ({
+      id: run.id,
+      fetched_at: run.fetched_at,
+      success_count: run.success_count,
+      error_count: run.error_count,
+    })),
+    ...syntheticRuns,
+  ].sort((left, right) => right.fetched_at.localeCompare(left.fetched_at));
+
   return {
-    runs: [...runs.results, ...syntheticRuns].sort((left, right) => right.fetched_at.localeCompare(left.fetched_at)),
+    runs: publicRuns,
     rows,
     latestCollection: latestCollectionRun
       ? {
@@ -58,6 +67,5 @@ export async function buildPublicHistoryResponse<Row extends PublicHistoryRow>(
           error_count: latestCollectionRun.error_count,
         }
       : null,
-    deletedAccountIds: exclusions.results.map((row) => row.account_id),
   };
 }
