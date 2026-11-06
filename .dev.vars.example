@@ -1,0 +1,17 @@
+# Local-only values. Copy this file to .dev.vars and fill the values you need.
+XSTATS_ADMIN_KEY=
+XSTATS_READ_MODE=private
+
+# Optional display/source tracking for a saved Sites release.
+SITE_VERSION_NUMBER=
+SITE_SOURCE_COMMIT=
+
+# Optional Microsoft OneDrive integration. Leave blank when unused.
+MICROSOFT_CLIENT_ID=
+MICROSOFT_CLIENT_SECRET=
+MICROSOFT_OWNER_EMAIL=
+# Alternative to MICROSOFT_OWNER_EMAIL:
+# MICROSOFT_OWNER_ID=
+MICROSOFT_TENANT_ID=consumers
+MICROSOFT_REDIRECT_URI=
+MICROSOFT_TOKEN_ENCRYPTION_KEY=

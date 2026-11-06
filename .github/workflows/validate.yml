@@ -20,6 +20,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Run lint
+        run: npm run lint
       - name: Confirm no known dependency vulnerabilities
         run: npm audit
       - name: Apply 0013–0014 to a disposable D1 and verify preserved data
@@ -72,6 +74,15 @@ jobs:
           done
       - name: Build and run the complete test suite
         run: npm test
+      - name: Validate standalone Workers config with a disposable D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp wrangler.jsonc.example wrangler.jsonc
+          trap 'rm -f wrangler.jsonc' EXIT
+          persist="$RUNNER_TEMP/xstats-worker-d1"
+          npx wrangler d1 migrations apply DB --local --config wrangler.jsonc --persist-to "$persist"
+          npm run deploy -- --dry-run
       - name: Install Playwright and Chromium for read-access browser tests
         run: |
           npm install --no-save --package-lock=false playwright
@@ -87,7 +98,7 @@ jobs:
           {"d1":"DB"}
           JSON
           cat > "$RUNNER_TEMP/wrangler-api-test.jsonc" <<JSON
-          {"name":"site-creator-d1","compatibility_date":"2026-11-06","d1_databases":[{"binding":"DB","database_name":"site-creator-d1","database_id":"00000000-0000-4000-8000-000000000000","migrations_dir":"$GITHUB_WORKSPACE/drizzle"}]}
+          {"name":"site-creator-d1","compatibility_date":"2026-11-06","d1_databases":[{"binding":"DB","database_name":"site-creator-d1","database_id":"00000000-0000-4000-8000-000000000001","migrations_dir":"$GITHUB_WORKSPACE/drizzle"}]}
           JSON
           persist="$GITHUB_WORKSPACE/.wrangler/state"
           run_d1() {

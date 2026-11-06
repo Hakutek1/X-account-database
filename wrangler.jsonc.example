@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "x-account-database",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-11-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "XSTATS_READ_MODE": "private"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "x-account-database",
+      "database_id": "00000000-0000-4000-8000-000000000001",
+      "migrations_dir": "./drizzle"
+    }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  }
+}
