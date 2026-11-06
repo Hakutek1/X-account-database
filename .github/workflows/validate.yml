@@ -98,7 +98,7 @@ jobs:
           {"d1":"DB"}
           JSON
           cat > "$RUNNER_TEMP/wrangler-api-test.jsonc" <<JSON
-          {"name":"site-creator-d1","compatibility_date":"2026-11-06","d1_databases":[{"binding":"DB","database_name":"site-creator-d1","database_id":"00000000-0000-4000-8000-000000000000","migrations_dir":"$GITHUB_WORKSPACE/drizzle"}]}
+          {"name":"site-creator-d1","compatibility_date":"2026-11-06","d1_databases":[{"binding":"DB","database_name":"site-creator-d1","database_id":"00000000-0000-4000-8000-000000000001","migrations_dir":"$GITHUB_WORKSPACE/drizzle"}]}
           JSON
           persist="$GITHUB_WORKSPACE/.wrangler/state"
           run_d1() {
