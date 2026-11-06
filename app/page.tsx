@@ -980,7 +980,6 @@ const SimpleChart = memo(function SimpleChart({ mode, metric, chartTitle, chartT
   const chartPage = paginateChartRows(chartDataRows, chartDataPage, CHART_DATA_PAGE_SIZE);
   const chartFocusedMarkIndex = Math.min(chartFocusedMark, Math.max(0, chartDataRows.length - 1));
   const chartMarkIndexByKey = useMemo(() => new Map(chartDataRows.map((row, index) => [row.key, index] as const)), [chartDataRows]);
-  useEffect(() => setChartDataPage(0), [chartDataRows]);
   const showTooltipAt = (clientX: number, clientY: number, displayName: string, value: number, date?: string) => {
     const bounds = chartRef.current?.getBoundingClientRect();
     if (!bounds) return;
@@ -1152,7 +1151,7 @@ const SimpleChart = memo(function SimpleChart({ mode, metric, chartTitle, chartT
             <tbody>{chartPage.rows.length ? chartPage.rows.map((row) => <tr key={row.key}><td>{row.date || "—"}</td><td>{row.displayName}</td><td>@{row.handle}</td><td>{chartMetricLabels[metric]}</td><td>{formatChartValue(row.value, metric)}</td></tr>) : <tr><td colSpan={5}>条件に一致するデータがありません。</td></tr>}</tbody>
           </table>
         </div>
-        <div className="chart-data-table-pagination"><button type="button" className="secondary-button" onClick={() => setChartDataPage((current) => Math.max(0, current - 1))} disabled={chartPage.page === 0}>前へ</button><span>{chartPage.page + 1} / {chartPage.totalPages}ページ</span><button type="button" className="secondary-button" onClick={() => setChartDataPage((current) => Math.min(chartPage.totalPages - 1, current + 1))} disabled={chartPage.page >= chartPage.totalPages - 1}>次へ</button></div>
+        <div className="chart-data-table-pagination"><button type="button" className="secondary-button" onClick={() => setChartDataPage(Math.max(0, chartPage.page - 1))} disabled={chartPage.page === 0}>前へ</button><span>{chartPage.page + 1} / {chartPage.totalPages}ページ</span><button type="button" className="secondary-button" onClick={() => setChartDataPage(Math.min(chartPage.totalPages - 1, chartPage.page + 1))} disabled={chartPage.page >= chartPage.totalPages - 1}>次へ</button></div>
       </div>
     </details>
     </>
