@@ -111,7 +111,7 @@ async function fetchProfileOnce(handle: string): Promise<ProfileResult> {
     response = await fetch(url, {
       headers: {
         Accept: "application/json",
-        "User-Agent": "X-Account-Stats/1.0 (+https://x-account-stats.hakutek1.chatgpt.site)",
+        "User-Agent": "X-Account-Database/1.0",
       },
       signal: controller.signal,
     });

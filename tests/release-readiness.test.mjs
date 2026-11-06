@@ -60,3 +60,9 @@ test("the standalone Worker example uses only a neutral D1 placeholder", async (
   assert.equal(config.d1_databases[0].database_id, "00000000-0000-4000-8000-000000000001");
   assert.equal(config.vars.XSTATS_READ_MODE, "private");
 });
+
+test("profile requests identify the public project without a personal site URL", async () => {
+  const source = await read("../lib/x-stats.ts");
+  assert.match(source, /X-Account-Database\/1\.0/);
+  assert.doesNotMatch(source, /"User-Agent":\s*"[^"]*https?:\/\//);
+});
