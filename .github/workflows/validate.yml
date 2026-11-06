@@ -103,8 +103,7 @@ jobs:
           server_pid=""
           stop_server() {
             if [ -n "$server_pid" ]; then
-              pkill -TERM -P "$server_pid" 2>/dev/null || true
-              kill -TERM "$server_pid" 2>/dev/null || true
+              kill -TERM -- "-$server_pid" 2>/dev/null || true
               wait "$server_pid" 2>/dev/null || true
               server_pid=""
             fi
@@ -112,15 +111,16 @@ jobs:
           trap stop_server EXIT
           start_server() {
             label="$1"
-            npm run dev -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/xstats-dev-$label.log" 2>&1 &
+            port="$2"
+            setsid npm run dev -- --host 127.0.0.1 --port "$port" > "$RUNNER_TEMP/xstats-dev-$label.log" 2>&1 &
             server_pid=$!
             for attempt in $(seq 1 60); do
-              if curl --silent --fail http://127.0.0.1:4173/ >/dev/null; then return; fi
+              if curl --silent --fail "http://127.0.0.1:$port/" >/dev/null; then return; fi
               if [ "$attempt" -eq 60 ]; then cat "$RUNNER_TEMP/xstats-dev-$label.log"; exit 1; fi
               sleep 2
             done
           }
-          start_server private
+          start_server private 4173
           curl --silent --show-error --fail http://127.0.0.1:4173/ >/dev/null
           curl --silent --show-error --fail http://127.0.0.1:4173/api/site-version \
             | node --input-type=module -e 'let data=""; for await (const part of process.stdin) data += part; const result = JSON.parse(data); if (result.version !== 105 || result.label !== "Ver.1.05" || result.sourceCommit !== process.env.SOURCE_COMMIT) process.exit(1); console.log(JSON.stringify(result));'
@@ -140,10 +140,10 @@ jobs:
           XSTATS_ADMIN_KEY=preview-only-key
           XSTATS_READ_MODE=public
           EOF
-          start_server public
+          start_server public 4174
           mkdir -p "$RUNNER_TEMP/xstats-preview"
-          APP_URL=http://127.0.0.1:4173 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-api-access.mjs public
-          APP_URL=http://127.0.0.1:4173 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-access-browser.mjs
+          APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-api-access.mjs public
+          APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-access-browser.mjs
           SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/preview-screenshots.mjs
           run_d1 "SELECT 'READ_ONLY|' || (SELECT last_seen_at FROM xstats_sessions WHERE id = 'xstats-public-shared') || '|' || (SELECT updated_at FROM xstats_daily_history_meta WHERE session_id = 'xstats-public-shared') || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'READ_ONLY|2000-01-01T00:00:00.000Z|2000-01-01T00:00:00.000Z|0|0|0|0|0|0|0|0|0'
       - uses: actions/upload-artifact@v4
