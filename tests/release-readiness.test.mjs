@@ -64,5 +64,5 @@ test("the standalone Worker example uses only a neutral D1 placeholder", async (
 test("profile requests identify the public project without a personal site URL", async () => {
   const source = await read("../lib/x-stats.ts");
   assert.match(source, /X-Account-Database\/1\.0/);
-  assert.doesNotMatch(source, /x-account-stats\.hakutek1\.chatgpt\.site/);
+  assert.doesNotMatch(source, /"User-Agent":\s*"[^"]*https?:\/\//);
 });
