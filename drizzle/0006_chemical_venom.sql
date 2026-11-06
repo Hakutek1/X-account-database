@@ -1,0 +1,1 @@
+ALTER TABLE `xstats_account_assets` ADD `avatar_data` text;

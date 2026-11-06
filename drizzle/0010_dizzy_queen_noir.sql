@@ -1,0 +1,1 @@
+ALTER TABLE `xstats_account_statuses` ADD `joined_at` text;

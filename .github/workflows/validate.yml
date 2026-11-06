@@ -1,0 +1,125 @@
+name: Security, integration and migration checks
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Confirm no known dependency vulnerabilities
+        run: npm audit
+      - name: Apply 0013 to a disposable D1 and verify preserved data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/drizzle-before"
+          cp drizzle/*.sql "$RUNNER_TEMP/drizzle-before/"
+          cp drizzle/meta/_journal.json "$RUNNER_TEMP/drizzle-before/_journal.json"
+          python3 - "$RUNNER_TEMP/drizzle-before" <<'PY'
+          import json
+          import pathlib
+          import sys
+          folder = pathlib.Path(sys.argv[1])
+          migrations = list(folder.glob("0013_*.sql"))
+          if len(migrations) != 1:
+              raise SystemExit(f"Expected one 0013 migration, found {len(migrations)}")
+          tag = migrations[0].stem
+          migrations[0].unlink()
+          journal_path = folder / "_journal.json"
+          journal = json.loads(journal_path.read_text())
+          old_count = len(journal["entries"])
+          journal["entries"] = [entry for entry in journal["entries"] if entry["tag"] != tag]
+          if len(journal["entries"]) != old_count - 1:
+              raise SystemExit("Expected exactly one 0013 journal entry")
+          journal_path.write_text(json.dumps(journal))
+          PY
+          cat > "$RUNNER_TEMP/wrangler-before.jsonc" <<JSON
+          {"name":"xstats-removal-test","compatibility_date":"2026-10-29","d1_databases":[{"binding":"DB","database_name":"xstats-removal-test","database_id":"00000000-0000-0000-0000-000000000001","migrations_dir":"$RUNNER_TEMP/drizzle-before"}]}
+          JSON
+          cat > "$RUNNER_TEMP/wrangler-after.jsonc" <<JSON
+          {"name":"xstats-removal-test","compatibility_date":"2026-10-29","d1_databases":[{"binding":"DB","database_name":"xstats-removal-test","database_id":"00000000-0000-0000-0000-000000000001","migrations_dir":"$GITHUB_WORKSPACE/drizzle"}]}
+          JSON
+          persist="$RUNNER_TEMP/d1-state"
+          npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-before.jsonc" --persist-to "$persist"
+          cat > "$RUNNER_TEMP/seed.sql" <<'SQL'
+          INSERT INTO xstats_sessions (id, created_at, last_seen_at) VALUES ('d1-removal-test', '2026-10-29T00:00:00.000Z', '2026-10-29T00:00:00.000Z');
+          INSERT INTO xstats_account_statuses (session_id, account_id, status, joined_at, updated_at) VALUES ('d1-removal-test', 'retained-account', 'suspended', '2020-01-02', '2026-10-29T00:00:00.000Z');
+          INSERT INTO xstats_daily_history (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at) VALUES ('history-row-1', 'd1-removal-test', '2020-01-02', 'history-account', 'history-account', 'History Account', 100, 20, 5, '2026-10-29T00:00:00.000Z', 'manual', '2026-10-29T00:00:00.000Z');
+          INSERT INTO xstats_schedules (session_id, hours, enabled, updated_at) VALUES ('d1-removal-test', '0,6', 1, '2026-10-29T00:00:00.000Z');
+          INSERT INTO xstats_watchlist (id, session_id, handle, created_at, updated_at) VALUES ('watch-row-1', 'd1-removal-test', 'watch-account', '2026-10-29T00:00:00.000Z', '2026-10-29T00:00:00.000Z');
+          SQL
+          npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-before.jsonc" --persist-to "$persist" --file "$RUNNER_TEMP/seed.sql"
+          npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist"
+          output="$(npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist" --command "SELECT 'removed:xstats_schedules:' || COUNT(*) AS result FROM sqlite_master WHERE type='table' AND name='xstats_schedules' UNION ALL SELECT 'removed:xstats_watchlist:' || COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_watchlist' UNION ALL SELECT 'status:retained-account:' || status || ':' || joined_at FROM xstats_account_statuses WHERE session_id='d1-removal-test' UNION ALL SELECT 'history:history-account:2020-01-02' FROM xstats_daily_history WHERE id='history-row-1' AND account_id='history-account' AND date='2020-01-02' UNION ALL SELECT 'table:' || name FROM sqlite_master WHERE type='table' AND name IN ('xstats_sessions','xstats_runs','xstats_snapshots','xstats_account_statuses','xstats_daily_history','xstats_daily_history_meta','xstats_historical_account_exclusions','xstats_account_assets','xstats_import_mappings','xstats_import_issues','xstats_microsoft_tokens') ORDER BY result")"
+          printf '%s\n' "$output"
+          for expected in 'removed:xstats_schedules:0' 'removed:xstats_watchlist:0' 'status:retained-account:suspended:2020-01-02' 'history:history-account:2020-01-02' 'table:xstats_sessions' 'table:xstats_runs' 'table:xstats_snapshots' 'table:xstats_account_statuses' 'table:xstats_daily_history' 'table:xstats_daily_history_meta' 'table:xstats_historical_account_exclusions' 'table:xstats_account_assets' 'table:xstats_import_mappings' 'table:xstats_import_issues' 'table:xstats_microsoft_tokens'; do
+            printf '%s' "$output" | grep -F "$expected" >/dev/null || { echo "Missing D1 verification result: $expected"; exit 1; }
+          done
+      - name: Build and run the complete test suite
+        run: npm test
+      - name: Start the application and verify its HTTP and version API
+        shell: bash
+        env:
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          cat > .dev.vars <<EOF
+          SITE_VERSION_NUMBER=105
+          SITE_SOURCE_COMMIT=$SOURCE_COMMIT
+          XSTATS_ADMIN_KEY=preview-only-key
+          EOF
+          npm run dev -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/xstats-dev.log" 2>&1 &
+          server_pid=$!
+          echo "$server_pid" > "$RUNNER_TEMP/xstats-dev.pid"
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:4173/ >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat "$RUNNER_TEMP/xstats-dev.log"; exit 1; fi
+            sleep 2
+          done
+          curl --silent --show-error --fail http://127.0.0.1:4173/ >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:4173/api/site-version \
+            | node --input-type=module -e 'let data=""; for await (const part of process.stdin) data += part; const result = JSON.parse(data); if (result.version !== 105 || result.label !== "Ver.1.05" || result.sourceCommit !== process.env.SOURCE_COMMIT) process.exit(1); console.log(JSON.stringify(result));'
+      - name: Install Playwright and Chromium for optional screenshots
+        id: playwright-install
+        continue-on-error: true
+        run: |
+          npm install --no-save --package-lock=false playwright
+          npx playwright install --with-deps chromium
+      - name: Capture desktop and mobile graph screens
+        id: preview-screenshots
+        if: steps.playwright-install.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/xstats-preview"
+          SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/preview-screenshots.mjs
+      - uses: actions/upload-artifact@v4
+        if: steps.preview-screenshots.outcome == 'success'
+        with:
+          name: xstats-dashboard-screenshots
+          path: ${{ runner.temp }}/xstats-preview/*.png
+          if-no-files-found: error
+      - name: Stop the local preview app
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/xstats-dev.pid" ]; then
+            server_pid="$(cat "$RUNNER_TEMP/xstats-dev.pid")"
+            pkill -TERM -P "$server_pid" 2>/dev/null || true
+            kill -TERM "$server_pid" 2>/dev/null || true
+          fi

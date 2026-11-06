@@ -1,0 +1,104 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1784712169288,
+      "tag": "0000_goofy_diamondback",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784778557413,
+      "tag": "0001_numerous_chameleon",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784803313862,
+      "tag": "0002_conscious_maximus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784973364923,
+      "tag": "0003_careful_talisman",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785017625867,
+      "tag": "0004_lovely_infant_terrible",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785068255983,
+      "tag": "0005_big_overlord",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785069107878,
+      "tag": "0006_chemical_venom",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785070748297,
+      "tag": "0007_regular_multiple_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1785764639889,
+      "tag": "0008_whole_marvel_zombies",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786255192000,
+      "tag": "0009_expand_account_statuses",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1786529834873,
+      "tag": "0010_dizzy_queen_noir",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788446523016,
+      "tag": "0011_lethal_husk",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793204022208,
+      "tag": "0012_third_omega_sentinel",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1793207562906,
+      "tag": "0013_amazing_spyke",
+      "breakpoints": true
+    }
+  ]
+}
