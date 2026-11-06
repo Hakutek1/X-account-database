@@ -10,7 +10,8 @@ export async function GET(request: Request) {
     const db = getD1();
     const payload = await buildPublicHistoryResponse(db as unknown as ReadOnlyHistoryDatabase, session.id, () => loadEffectiveHistory(db, session.id));
     return json(payload);
-  } catch {
+  } catch (error) {
+    console.error("履歴の読み込みに失敗しました", error);
     return json({
       error: "履歴を読み込めませんでした",
       runs: [],
