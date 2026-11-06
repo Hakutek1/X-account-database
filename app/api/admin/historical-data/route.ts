@@ -1,7 +1,7 @@
 import { dailyRecordDate, ensureDailyHistory, ensureDailyPostsThroughToday, ensureOpeningDateHistory, loadDailyHistory, loadDailyHistoryMeta, type DailyHistoryMetric, type DailyHistoryRow } from "../../../../lib/daily-history";
 import { loadAccountAssets } from "../../../../lib/account-assets";
 import { ensureAccountStatuses, isAccountStatus, loadAccountJoinedMap, loadAccountStatusMap, type AccountStatus } from "../../../../lib/account-status";
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin, requireReadAccess } from "../../_shared";
 
 const METRICS = new Set<DailyHistoryMetric>(["followers", "following", "posts"]);
 const MAX_ACCOUNTS = 500;
@@ -86,7 +86,7 @@ function identityMap(rows: SnapshotIdentity[], dailyRows: DailyHistoryRow[]) {
   return accounts;
 }
 
-async function getContext() {
+async function prepareEditorContext() {
   await ensureSchema();
   const db = getD1();
   const session = getSharedSession();
@@ -102,12 +102,13 @@ async function getContext() {
 }
 
 export async function GET(request: Request) {
-  const denied = await requireAdmin(request);
+  const denied = await requireReadAccess(request);
   if (denied) return denied;
   const metric = new URL(request.url).searchParams.get("metric");
   if (!isMetric(metric)) return json({ error: "指標が正しく指定されていません。" }, { status: 400 });
   try {
-    const { db, session } = await getContext();
+    const db = getD1();
+    const session = getSharedSession();
     const [dailyRows, meta, snapshots, assets, exclusions] = await Promise.all([
       loadDailyHistory(db, session.id),
       loadDailyHistoryMeta(db, session.id),
@@ -147,8 +148,19 @@ export async function GET(request: Request) {
       dates: [...dates].sort(),
       values,
     });
-  } catch (error) {
-    return json({ error: error instanceof Error ? error.message : "過去データを読み込めませんでした。" }, { status: 500 });
+  } catch {
+    return json({ error: "過去データを読み込めませんでした。" }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  const denied = await requireAdmin(request);
+  if (denied) return denied;
+  try {
+    await prepareEditorContext();
+    return json({ prepared: true });
+  } catch {
+    return json({ error: "過去データを準備できませんでした。" }, { status: 500 });
   }
 }
 
@@ -196,7 +208,7 @@ export async function PUT(request: Request) {
       }
     }
     if (cellCount > MAX_CELLS) return json({ error: "編集可能なセル数の上限を超えています。" }, { status: 413 });
-    const { db, session } = await getContext();
+    const { db, session } = await prepareEditorContext();
     const [dailyRows, snapshots, exclusions] = await Promise.all([
       loadDailyHistory(db, session.id),
       db.prepare("SELECT account_id, handle, display_name FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id").bind(session.id).all<SnapshotIdentity>(),

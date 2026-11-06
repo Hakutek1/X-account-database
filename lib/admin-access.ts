@@ -1,7 +1,17 @@
 import { env } from "cloudflare:workers";
+import { parseReadMode, type XstatsReadMode } from "./read-mode.ts";
 
 const ADMIN_COOKIE = "xstats_admin";
 const ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+export function getReadMode(): XstatsReadMode {
+  const value = (env as unknown as Record<string, unknown>).XSTATS_READ_MODE;
+  return parseReadMode(value);
+}
+
+export async function isReadAllowed(request: Request) {
+  return getReadMode() === "public" || isAdminRequest(request);
+}
 
 function configuredKey() {
   const value = (env as unknown as Record<string, unknown>).XSTATS_ADMIN_KEY;

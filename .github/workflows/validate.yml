@@ -71,55 +71,79 @@ jobs:
           done
       - name: Build and run the complete test suite
         run: npm test
-      - name: Start the application and verify its HTTP and version API
+      - name: Install Playwright and Chromium for read-access browser tests
+        run: |
+          npm install --no-save --package-lock=false playwright
+          npx playwright install --with-deps chromium
+      - name: Start the app and verify read access against a disposable D1
         shell: bash
         env:
           SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          mkdir -p .openai
+          cat > .openai/hosting.json <<'JSON'
+          {"d1":"DB"}
+          JSON
+          cat > "$RUNNER_TEMP/wrangler-api-test.jsonc" <<JSON
+          {"name":"site-creator-d1","compatibility_date":"2026-11-06","d1_databases":[{"binding":"DB","database_name":"site-creator-d1","database_id":"00000000-0000-4000-8000-000000000000","migrations_dir":"$GITHUB_WORKSPACE/drizzle"}]}
+          JSON
+          persist="$GITHUB_WORKSPACE/.wrangler/state"
+          run_d1() {
+            npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-api-test.jsonc" --persist-to "$persist" --command "$1"
+          }
+          npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-api-test.jsonc" --persist-to "$persist"
+          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0'
           cat > .dev.vars <<EOF
           SITE_VERSION_NUMBER=105
           SITE_SOURCE_COMMIT=$SOURCE_COMMIT
           XSTATS_ADMIN_KEY=preview-only-key
           EOF
-          npm run dev -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/xstats-dev.log" 2>&1 &
-          server_pid=$!
-          echo "$server_pid" > "$RUNNER_TEMP/xstats-dev.pid"
-          for attempt in $(seq 1 60); do
-            if curl --silent --fail http://127.0.0.1:4173/ >/dev/null; then break; fi
-            if [ "$attempt" -eq 60 ]; then cat "$RUNNER_TEMP/xstats-dev.log"; exit 1; fi
-            sleep 2
-          done
+          server_pid=""
+          stop_server() {
+            if [ -n "$server_pid" ]; then
+              pkill -TERM -P "$server_pid" 2>/dev/null || true
+              kill -TERM "$server_pid" 2>/dev/null || true
+              wait "$server_pid" 2>/dev/null || true
+              server_pid=""
+            fi
+          }
+          trap stop_server EXIT
+          start_server() {
+            label="$1"
+            npm run dev -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/xstats-dev-$label.log" 2>&1 &
+            server_pid=$!
+            for attempt in $(seq 1 60); do
+              if curl --silent --fail http://127.0.0.1:4173/ >/dev/null; then return; fi
+              if [ "$attempt" -eq 60 ]; then cat "$RUNNER_TEMP/xstats-dev-$label.log"; exit 1; fi
+              sleep 2
+            done
+          }
+          start_server private
           curl --silent --show-error --fail http://127.0.0.1:4173/ >/dev/null
           curl --silent --show-error --fail http://127.0.0.1:4173/api/site-version \
             | node --input-type=module -e 'let data=""; for await (const part of process.stdin) data += part; const result = JSON.parse(data); if (result.version !== 105 || result.label !== "Ver.1.05" || result.sourceCommit !== process.env.SOURCE_COMMIT) process.exit(1); console.log(JSON.stringify(result));'
-      - name: Install Playwright and Chromium for optional screenshots
-        id: playwright-install
-        continue-on-error: true
-        run: |
-          npm install --no-save --package-lock=false playwright
-          npx playwright install --with-deps chromium
-      - name: Capture desktop and mobile graph screens
-        id: preview-screenshots
-        if: steps.playwright-install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
+          APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private
+          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0'
+          APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private prepare
+          run_d1 "SELECT 'PREPARED|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions WHERE session_id='xstats-public-shared' AND account_id='excel:parodys.l.a') AS result" | grep -F 'PREPARED|0|0|0|0|0'
+          run_d1 "UPDATE xstats_sessions SET last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = 'xstats-public-shared'"
+          run_d1 "UPDATE xstats_daily_history_meta SET updated_at = '2000-01-01T00:00:00.000Z' WHERE session_id = 'xstats-public-shared'"
+          stop_server
+          cat > .dev.vars <<EOF
+          SITE_VERSION_NUMBER=105
+          SITE_SOURCE_COMMIT=$SOURCE_COMMIT
+          XSTATS_ADMIN_KEY=preview-only-key
+          XSTATS_READ_MODE=public
+          EOF
+          start_server public
           mkdir -p "$RUNNER_TEMP/xstats-preview"
+          APP_URL=http://127.0.0.1:4173 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-api-access.mjs public
+          APP_URL=http://127.0.0.1:4173 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-access-browser.mjs
           SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/preview-screenshots.mjs
+          run_d1 "SELECT 'READ_ONLY|' || (SELECT last_seen_at FROM xstats_sessions WHERE id = 'xstats-public-shared') || '|' || (SELECT updated_at FROM xstats_daily_history_meta WHERE session_id = 'xstats-public-shared') || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) AS result" | grep -F 'READ_ONLY|2000-01-01T00:00:00.000Z|2000-01-01T00:00:00.000Z|0|0|0|0|0|0|0|0|0'
       - uses: actions/upload-artifact@v4
-        if: steps.preview-screenshots.outcome == 'success'
         with:
-          name: xstats-dashboard-screenshots
+          name: xstats-read-access-screenshots
           path: ${{ runner.temp }}/xstats-preview/*.png
           if-no-files-found: error
-      - name: Stop the local preview app
-        if: always()
-        shell: bash
-        run: |
-          if [ -f "$RUNNER_TEMP/xstats-dev.pid" ]; then
-            server_pid="$(cat "$RUNNER_TEMP/xstats-dev.pid")"
-            pkill -TERM -P "$server_pid" 2>/dev/null || true
-            kill -TERM "$server_pid" 2>/dev/null || true
-          fi

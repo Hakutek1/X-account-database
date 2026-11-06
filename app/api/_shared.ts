@@ -1,7 +1,12 @@
 import { ensureSchema, ensureSharedSession, getD1, getSessionFromRequest, getSharedSession, sessionCookie } from "../../db";
-import { isAdminRequest } from "../../lib/admin-access";
+import { isAdminRequest, isReadAllowed } from "../../lib/admin-access";
 
 export { ensureSchema, ensureSharedSession, getD1, getSessionFromRequest, getSharedSession, sessionCookie };
+
+export async function requireReadAccess(request: Request) {
+  if (await isReadAllowed(request)) return null;
+  return json({ error: "閲覧には管理者ログインが必要です。" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+}
 
 export async function requireAdmin(request: Request) {
   if (await isAdminRequest(request)) return null;
@@ -64,6 +69,6 @@ export async function pruneSessionHistory(db: D1Database, sessionId: string) {
 export function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
-    headers: { "Content-Type": "application/json; charset=utf-8", ...(init?.headers ?? {}) },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...(init?.headers ?? {}) },
   });
 }

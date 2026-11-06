@@ -149,6 +149,9 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     setError(null);
     setMessage(null);
     try {
+      const prepared = await fetch("/api/admin/historical-data", { method: "POST", credentials: "same-origin", cache: "no-store" });
+      const preparePayload = await prepared.json().catch(() => ({})) as HistoricalResponse;
+      if (!prepared.ok) throw new Error(preparePayload.error ?? "過去データを準備できませんでした。");
       const response = await fetch(`/api/admin/historical-data?metric=${nextMetric}`, { credentials: "same-origin", cache: "no-store" });
       const payload = await response.json().catch(() => ({})) as HistoricalResponse;
       if (!response.ok) throw new Error(payload.error ?? "過去データを読み込めませんでした。");

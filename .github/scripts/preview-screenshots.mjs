@@ -55,7 +55,7 @@ try {
       localStorage.setItem("x-account-stats-dashboard-v2", JSON.stringify({ rows, selectedHandles: ["account_a", "account_b"] }));
     });
     await page.route("**/api/history", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(historyResponse) }));
-    await page.route("**/api/admin/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, isAdmin: true }) }));
+    await page.route("**/api/admin/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, isAdmin: true, readMode: "public" }) }));
     await page.route("**/api/admin/historical-data**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       metric: "followers",
       revision: 1,

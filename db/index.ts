@@ -90,14 +90,10 @@ export function getSharedSession() {
 }
 
 /**
- * Older versions only recorded deleted accounts in the exclusion table. Purge
- * those legacy tombstones from every account-bearing table before serving the
- * shared site, so old deletions cannot remain in charts or rankings.
+ * Purge accounts explicitly recorded in the exclusion table from shared data
+ * before an administrator writes a migrated session.
  */
-async function purgeLegacyHistoricalAccountExclusions(database: D1Database) {
-  // This account was deleted before the exclusion table was introduced. Keep
-  // a tombstone so the browser's local Excel fallback cannot resurrect it.
-  await database.prepare("INSERT OR IGNORE INTO xstats_historical_account_exclusions (session_id, account_id, updated_at) VALUES (?, ?, ?)").bind(SHARED_SESSION_ID, "excel:parodys.l.a", new Date().toISOString()).run();
+async function purgeExcludedHistoricalAccounts(database: D1Database) {
   const excluded = await database.prepare("SELECT account_id FROM xstats_historical_account_exclusions WHERE session_id = ?").bind(SHARED_SESSION_ID).all<{ account_id: string }>();
   if (!excluded.results.length) return;
   const placeholders = excluded.results.map(() => "?").join(", ");
@@ -120,7 +116,7 @@ export async function ensureSharedSession(database: D1Database = getD1()) {
   await database.prepare("INSERT INTO xstats_sessions (id, created_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at").bind(SHARED_SESSION_ID, now, now).run();
   // The one-time copy is deliberately keyed by the shared session itself.
   if (existing) {
-    await purgeLegacyHistoricalAccountExclusions(database);
+    await purgeExcludedHistoricalAccounts(database);
     return getSharedSession();
   }
 
@@ -137,6 +133,6 @@ export async function ensureSharedSession(database: D1Database = getD1()) {
     database.prepare("INSERT OR IGNORE INTO xstats_import_issues (id, session_id, import_id, issue_type, source_sheet, source_name, account_id, handle, display_name, date, metric, source_value, site_value, details, created_at) SELECT id, ?, import_id, issue_type, source_sheet, source_name, account_id, handle, display_name, date, metric, source_value, site_value, details, created_at FROM xstats_import_issues WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
   ];
   await database.batch(statements);
-  await purgeLegacyHistoricalAccountExclusions(database);
+  await purgeExcludedHistoricalAccounts(database);
   return getSharedSession();
 }
