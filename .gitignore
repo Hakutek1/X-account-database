@@ -28,8 +28,14 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# local environment values (keep only the blank example file)
 .env*
+.dev.vars*
+!.dev.vars.example
+
+# per-installation hosting metadata and database IDs
+/.openai/
+/wrangler.jsonc
 
 # vercel
 .vercel
