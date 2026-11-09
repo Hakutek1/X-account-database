@@ -772,3 +772,40 @@ html[data-theme="dark"] .selected-only-toggle.is-active { color: var(--teal); }
 
 .results-mobile-sort label { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 10px; font-weight: 700; }
 .results-mobile-sort select { min-height: 34px; padding: 6px 9px; border: 1px solid var(--silver-soft); border-radius: 7px; color: var(--ink); background: var(--card); }
+
+.account-editor-dialog { width: min(680px, calc(100vw - 28px)); max-width: 680px; max-height: min(88vh, 760px); margin: auto; padding: 0; overflow: hidden; color: var(--ink); background: var(--card); border: 1px solid var(--silver-soft); border-radius: 16px; box-shadow: var(--shadow); }
+.account-editor-dialog::backdrop { background: rgba(7, 18, 30, .58); backdrop-filter: blur(3px); }
+.account-editor-content { display: flex; flex-direction: column; max-height: min(88vh, 760px); }
+.account-editor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 24px 17px; border-bottom: 1px solid var(--silver-soft); }
+.account-editor-header h2 { margin: 0; font-size: 21px; }
+.account-editor-header p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.account-editor-close { flex: 0 0 34px; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--silver-soft); border-radius: 9px; color: var(--muted); background: var(--surface-subtle); font-size: 20px; line-height: 1; }
+.account-editor-close:hover, .account-target-remove:hover { color: var(--coral); border-color: var(--coral); }
+.account-editor-body { padding: 20px 24px 22px; overflow-y: auto; }
+.account-editor-body textarea { min-height: 90px; }
+.account-editor-add-row, .account-target-heading, .account-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.account-editor-add-row { margin-top: 12px; }
+.account-editor-add-row .primary-button { padding: 9px 15px; }
+.account-target-heading { margin: 24px 0 10px; }
+.account-target-heading h3 { margin: 0; font-size: 14px; }
+.account-target-heading span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.account-target-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; max-height: 330px; min-height: 54px; margin: 0; padding: 12px; overflow: auto; list-style: none; border: 1px solid var(--silver-soft); border-radius: 12px; background: var(--surface-subtle); }
+.account-target-chip { display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 100%; padding: 4px 5px 4px 12px; border: 1px solid var(--silver-soft); border-radius: 999px; color: var(--ink); background: var(--card); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.account-target-chip > span { min-width: 0; }
+.account-target-remove { flex: 0 0 26px; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--silver-soft); border-radius: 50%; color: var(--muted); background: transparent; font-size: 17px; line-height: 1; }
+.account-target-empty { margin: 0; padding: 18px 12px; color: var(--muted); border: 1px dashed var(--silver-soft); border-radius: 12px; font-size: 12px; text-align: center; }
+.account-editor-feedback { margin: 12px 0 0; color: var(--teal-dark); font-size: 12px; line-height: 1.6; }
+.account-editor-footer { justify-content: flex-end; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--silver-soft); }
+.input-actions { display: flex; align-items: center; gap: 10px; }
+@media (max-width: 680px) {
+  .account-editor-dialog { width: calc(100vw - 20px); max-height: 92vh; }
+  .account-editor-content { max-height: 92vh; }
+  .account-editor-header { padding: 18px 16px 14px; }
+  .account-editor-body { padding: 16px; }
+  .account-editor-add-row { align-items: flex-start; }
+  .account-target-list { max-height: 48vh; gap: 6px; padding: 9px; }
+  .account-target-chip { font-size: 11px; }
+  .input-footer { flex-wrap: wrap; }
+  .input-actions { width: 100%; }
+  .input-actions button { flex: 1; }
+}
