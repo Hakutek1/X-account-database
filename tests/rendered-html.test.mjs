@@ -32,7 +32,10 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.match(html, /グラフ表示/);
   assert.match(html, /過去データ追加/);
   assert.match(html, /取得データ/);
-  assert.match(html, /SNAPSHOT DATA/);
+  assert.doesNotMatch(html, /ACCOUNT INTELLIGENCE|INPUT SOURCES|PUBLIC DASHBOARD|PRIVATE DASHBOARD|SNAPSHOT DATA|VISUAL ANALYSIS/);
+  assert.match(html, /取得対象を編集/);
+  assert.match(html, /<dialog/);
+  assert.match(html, /account-target-list/);
   assert.doesNotMatch(html, /NFLF重複を確認/);
   assert.match(html, /topComparisonTargetDate/);
   assert.doesNotMatch(html, /前週比/);
@@ -296,7 +299,8 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.match(layout, /favicon\.svg/);
   assert.match(favicon, /stroke="#9ADBD6"/);
   assert.doesNotMatch(html, /Xリスト|リストのメンバー/);
-  assert.match(html, /handleAccountInputKeyDown/);
+  assert.match(html, /parseHandleTargetInput/);
+  assert.match(html, /removeHandleTarget/);
   assert.doesNotMatch(html, /hero-note/);
   assert.match(html, /requestCollect/);
   assert.match(html, /public-readonly-card/);

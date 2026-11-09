@@ -10,6 +10,7 @@ import HistoricalDataEditor from "./historical-data-editor";
 import { resolveLinearAxisDomain } from "../lib/chart-axis";
 import { FALLBACK_SITE_VERSION_NUMBER, formatSiteVersion } from "../lib/site-version";
 import { CHART_DATA_PAGE_SIZE, filterChartPickerAccounts, getNextChartMarkIndex, getRovingTabIndex, groupChartPickerAccounts, paginateChartRows, updateChartSelection } from "../lib/chart-accessibility";
+import { addHandleTargets, normalizeStoredHandleTargets, parseHandleTargetInput, removeHandleTarget } from "../lib/account-targets";
 
 const MAX_ACCOUNTS = 500;
 const numberFormatter = new Intl.NumberFormat("ja-JP");
@@ -174,13 +175,6 @@ function resolvedDisplayName(row: Pick<AccountRow, "id" | "handle" | "displayNam
   const original = "displayName" in row ? row.displayName : row.display_name;
   const handle = row.handle.toLowerCase();
   return overrides[accountId]?.trim() || overrides[handle]?.trim() || overrides[`@${handle}`]?.trim() || original;
-}
-
-function parseLines(value: string) {
-  return value
-    .split(/[\n,\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function uniqueValues(values: string[]) {
@@ -1171,6 +1165,9 @@ function AppBadge({ children, tone = "neutral" }: { children: React.ReactNode; t
 
 export default function Home() {
   const [accountInput, setAccountInput] = useState("");
+  const [isAccountEditorOpen, setIsAccountEditorOpen] = useState(false);
+  const [accountEditorDraft, setAccountEditorDraft] = useState("");
+  const [accountEditorFeedback, setAccountEditorFeedback] = useState<string | null>(null);
   const [rows, setRows] = useState<AccountRow[]>([]);
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
   const [latestCollection, setLatestCollection] = useState<LatestCollection | null>(null);
@@ -1241,12 +1238,28 @@ export default function Home() {
   const chartSelectionInitialized = useRef(false);
   const avatarSyncFingerprint = useRef("");
   const chartExportRef = useRef<(() => Promise<void>) | null>(null);
+  const accountEditorDialogRef = useRef<HTMLDialogElement>(null);
+  const accountEditorInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const dialog = accountEditorDialogRef.current;
+    if (!dialog) return;
+    if (isAccountEditorOpen && !dialog.open) {
+      dialog.showModal();
+      window.requestAnimationFrame(() => accountEditorInputRef.current?.focus());
+    } else if (!isAccountEditorOpen && dialog.open) {
+      dialog.close();
+    }
+  }, [isAccountEditorOpen]);
 
   const clearCachedAccountData = () => {
     setRows([]);
     setHistoryRows([]);
     setLatestCollection(null);
     setAccountInput("");
+    setIsAccountEditorOpen(false);
+    setAccountEditorDraft("");
+    setAccountEditorFeedback(null);
     setSelectedHandles([]);
     setDisplayNameOverrides({});
     setLegendColors({});
@@ -1840,23 +1853,47 @@ export default function Home() {
     }
   };
 
-  const handleAccountInputKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    const target = event.currentTarget;
-    const start = target.selectionStart;
-    const end = target.selectionEnd;
-    setAccountInput(`${accountInput.slice(0, start)}\n${accountInput.slice(end)}`);
-    window.requestAnimationFrame(() => {
-      target.selectionStart = start + 1;
-      target.selectionEnd = start + 1;
-    });
+  const openAccountEditor = () => {
+    const normalized = normalizeStoredHandleTargets(accountInput);
+    setAccountInput(normalized.handles.join("\n"));
+    setAccountEditorDraft("");
+    setAccountEditorFeedback(
+      normalized.errors.length
+        ? `${normalized.errors.length}件の形式不正な入力を取得対象から除外しました。`
+        : null,
+    );
+    setIsAccountEditorOpen(true);
+  };
+
+  const addAccountTargets = () => {
+    const existingHandles = parseHandleTargetInput(accountInput).handles;
+    const result = addHandleTargets(existingHandles, accountEditorDraft, MAX_ACCOUNTS);
+    setAccountInput(result.handles.join("\n"));
+    setAccountEditorDraft("");
+
+    const messages = [];
+    if (result.added.length) messages.push(`${result.added.length}件を取得対象に追加しました。`);
+    if (result.errors.length) messages.push(`${result.errors.length}件はハンドルとして認識できませんでした。`);
+    if (result.overflow) messages.push(`登録上限のため、${result.overflow}件は追加されませんでした。`);
+    setAccountEditorFeedback(messages.join(" ") || "新しく追加するアカウントはありませんでした。");
+    window.requestAnimationFrame(() => accountEditorInputRef.current?.focus());
+  };
+
+  const removeAccountTarget = (handle: string) => {
+    const existingHandles = parseHandleTargetInput(accountInput).handles;
+    setAccountInput(removeHandleTarget(existingHandles, handle).join("\n"));
   };
 
   const collect = async () => {
     if (!isAdmin || isLoading || collectInFlight.current) return;
-    const handles = parseLines(accountInput);
-    if (!handles.length) { setNotice({ tone: "error", message: "アカウントを入力してください。" }); return; }
+    const parsedTargets = normalizeStoredHandleTargets(accountInput);
+    const handles = parsedTargets.handles;
+    setAccountInput(handles.join("\n"));
+    if (!handles.length) { setNotice({ tone: "error", message: "ハンドル名を登録してください。" }); return; }
+    if (parsedTargets.errors.length) {
+      setNotice({ tone: "error", message: `${parsedTargets.errors.length}件の形式不正な入力を除外しました。取得対象を確認してください。` });
+      return;
+    }
     if (handles.length > MAX_ACCOUNTS && !window.confirm(`${handles.length}件の入力があります。先頭${MAX_ACCOUNTS}件だけ取得します。続けますか？`)) return;
     collectInFlight.current = true;
     setIsLoading(true);
@@ -1947,23 +1984,81 @@ export default function Home() {
     ? `最終取得: ${new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(latestCollection.fetched_at))} JST · 成功 ${formatNumber(latestCollection.success_count)}件 / 失敗 ${formatNumber(latestCollection.error_count)}件`
     : "最終取得: 取得記録なし";
 
+  const accountTargetHandles = normalizeStoredHandleTargets(accountInput).handles;
+
   return (
     <main className="site-shell">
       <header className="topbar editorial-topbar">
-        <div className="brand editorial-brand"><div className="brand-mark editorial-brand-mark" role="img" aria-label="グラフマーク"><span className="brand-bar brand-bar-short" /><span className="brand-bar brand-bar-medium" /><span className="brand-bar brand-bar-tall" /></div><div className="editorial-brand-copy"><p className="eyebrow">ACCOUNT INTELLIGENCE</p><p className="brand-name">複垢データベース</p></div></div>
+        <div className="brand editorial-brand"><div className="brand-mark editorial-brand-mark" role="img" aria-label="グラフマーク"><span className="brand-bar brand-bar-short" /><span className="brand-bar brand-bar-medium" /><span className="brand-bar brand-bar-tall" /></div><div className="editorial-brand-copy"><p className="brand-name">複垢データベース</p></div></div>
         <div className="topbar-meta editorial-topbar-meta"><div className="collection-status-meta"><span>取得元: fxTwitter</span><span>{latestCollectionLabel}</span></div><span className="topbar-divider" /><span>公開共有モード</span><button className="theme-toggle editorial-theme-toggle" type="button" onClick={toggleTheme} aria-pressed={theme === "dark"}>{theme === "dark" ? "☼ ライト" : "◐ ダーク"}</button></div>
       </header>
 
       <section className="hero-section">
-        {isAdmin ? <section className="input-card panel-card">
-          <div className="section-heading"><div><p className="eyebrow">INPUT SOURCES</p><h2>調べたいアカウントを追加</h2></div><AppBadge tone="accent">最大 {MAX_ACCOUNTS} 件</AppBadge></div>
-          <div className="input-grid input-grid-single">
-            <label className="field-group"><span className="field-label">アカウント</span><span className="field-help">@username またはプロフィールURLを改行区切りで入力</span><textarea value={accountInput} onChange={(event) => setAccountInput(event.target.value)} onKeyDown={handleAccountInputKeyDown} placeholder="@openai\n@xdevelopers\nhttps://x.com/username" rows={3} aria-label="調べたいアカウント" /></label>
-          </div>
-          <div className="input-footer"><span className="input-count">{uniqueValues(parseLines(accountInput)).length} / {MAX_ACCOUNTS} アカウント</span><button type="button" className="primary-button" onClick={collect} disabled={isLoading}>{isLoading ? <><span className="button-spinner" />取得中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button></div>
+        {isAdmin ? <>
+          <section className="input-card panel-card">
+            <div className="section-heading"><div><h2>調べたいアカウントを追加</h2></div><AppBadge tone="accent">最大 {MAX_ACCOUNTS} 件</AppBadge></div>
+            <div className="input-footer">
+              <span className="input-count">{accountTargetHandles.length} / {MAX_ACCOUNTS} アカウントを登録中</span>
+              <div className="input-actions">
+                <button type="button" className="secondary-button" onClick={openAccountEditor}>取得対象を編集</button>
+                <button type="button" className="primary-button" onClick={collect} disabled={isLoading}>{isLoading ? <><span className="button-spinner" />取得中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button>
+              </div>
+            </div>
 
-          {notice && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
-        </section> : readMode === "public" ? <section className="public-readonly-card panel-card"><p className="eyebrow">PUBLIC DASHBOARD</p><h2>共有データを閲覧中</h2><p>取得データとグラフは公開されています。アカウント追加とExcel操作は管理者のみ利用できます。</p></section> : <section className="public-readonly-card panel-card"><p className="eyebrow">PRIVATE DASHBOARD</p><h2>閲覧には管理者ログインが必要です</h2><p>このサイトは非公開モードです。管理者ログイン後にアカウントデータを表示します。</p></section>}
+            {notice && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
+          </section>
+          <dialog
+            ref={accountEditorDialogRef}
+            className="account-editor-dialog"
+            aria-labelledby="account-editor-title"
+            aria-describedby="account-editor-description"
+            aria-modal="true"
+            onCancel={(event) => { event.preventDefault(); setIsAccountEditorOpen(false); }}
+            onClick={(event) => { if (event.target === event.currentTarget) setIsAccountEditorOpen(false); }}
+          >
+            <div className="account-editor-content">
+              <div className="account-editor-header">
+                <div>
+                  <h2 id="account-editor-title">取得対象の編集</h2>
+                  <p id="account-editor-description">複数のハンドルをまとめて登録できます。×で取得対象から外しても、過去の取得データは保持されます。</p>
+                </div>
+                <button type="button" className="account-editor-close" aria-label="編集画面を閉じる" onClick={() => setIsAccountEditorOpen(false)}>×</button>
+              </div>
+              <div className="account-editor-body">
+                <label className="field-group">
+                  <span className="field-label">ハンドル名</span>
+                  <span className="field-help">改行・カンマ・空白で区切ってください。@は省略できます。XのプロフィールURLはハンドルに変換します。</span>
+                  <textarea
+                    ref={accountEditorInputRef}
+                    value={accountEditorDraft}
+                    onChange={(event) => setAccountEditorDraft(event.target.value)}
+                    placeholder="@openai, @xdevelopers"
+                    rows={3}
+                    aria-label="追加するハンドル名"
+                  />
+                </label>
+                <div className="account-editor-add-row">
+                  <span className="input-count">{accountTargetHandles.length} / {MAX_ACCOUNTS} 件登録済み</span>
+                  <button type="button" className="primary-button" onClick={addAccountTargets}>追加</button>
+                </div>
+                <div className="account-target-heading">
+                  <h3>登録アカウント一覧</h3>
+                  <span>{accountTargetHandles.length}件</span>
+                </div>
+                {accountTargetHandles.length ? <ul className="account-target-list" aria-label="取得対象アカウント">
+                  {accountTargetHandles.map((handle) => <li className="account-target-chip" key={handle.toLowerCase()}>
+                    <span>@{handle}</span>
+                    <button type="button" className="account-target-remove" aria-label={`@${handle}を取得対象から外す`} onClick={() => removeAccountTarget(handle)}>×</button>
+                  </li>)}
+                </ul> : <p className="account-target-empty">登録済みアカウントはありません。</p>}
+                {accountEditorFeedback && <p className="account-editor-feedback" role="status">{accountEditorFeedback}</p>}
+                <div className="account-editor-footer">
+                  <button type="button" className="secondary-button" onClick={() => setIsAccountEditorOpen(false)}>閉じる</button>
+                </div>
+              </div>
+            </div>
+          </dialog>
+        </> : readMode === "public" ? <section className="public-readonly-card panel-card"><h2>共有データを閲覧中</h2><p>取得データとグラフは公開されています。アカウント追加とExcel操作は管理者のみ利用できます。</p></section> : <section className="public-readonly-card panel-card"><h2>閲覧には管理者ログインが必要です</h2><p>このサイトは非公開モードです。管理者ログイン後にアカウントデータを表示します。</p></section>}
         {notice && !isAdmin && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
       </section>
 
@@ -1982,7 +2077,7 @@ export default function Home() {
       </div>
 
       <section className="workspace-grid">
-        {activeTab === "results" ? <div key={activeTab} className="table-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-results" aria-labelledby="dashboard-tab-results" tabIndex={0}><div className="section-heading"><div><p className="eyebrow">SNAPSHOT DATA</p><h2>取得データ</h2></div><div className="results-heading-actions">{selectedResultDate && resultsViewMode !== "top10" && <AppBadge>{selectedResultDate}</AppBadge>}<StatusFilter selected={statusFilter} onChange={setStatusFilter} /><div className="results-view-tabs" role="tablist" aria-label="取得データの表示形式" onKeyDown={(event) => handleTabListKeyDown(event, ["table", "compact", "top10"] as const, (value) => setResultsViewMode(value))}><button id="results-view-tab-table" type="button" role="tab" aria-selected={resultsViewMode === "table"} aria-controls="results-view-panel-table" tabIndex={resultsViewMode === "table" ? 0 : -1} className={resultsViewMode === "table" ? "is-active" : ""} onClick={() => setResultsViewMode("table")}>通常</button><button id="results-view-tab-compact" type="button" role="tab" aria-selected={resultsViewMode === "compact"} aria-controls="results-view-panel-compact" tabIndex={resultsViewMode === "compact" ? 0 : -1} className={resultsViewMode === "compact" ? "is-active" : ""} onClick={() => setResultsViewMode("compact")}>コンパクト</button><button id="results-view-tab-top10" type="button" role="tab" aria-selected={resultsViewMode === "top10"} aria-controls="results-view-panel-top10" tabIndex={resultsViewMode === "top10" ? 0 : -1} className={resultsViewMode === "top10" ? "is-active" : ""} onClick={() => setResultsViewMode("top10")}>ランキング</button></div></div></div>{resultsViewMode !== "top10" && <DateCalendar key={selectedResultDate} availableDates={resultAvailableDates} selectedDate={selectedResultDate} onDateChange={setResultDate} />}{resultsViewMode === "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" tabIndex={0}><ResultsTable rows={visibleResultRows} onSort={handleSort} sortKey={sortKey} direction={sortDirection} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} onDisplayNameChange={updateDisplayName} /></div>}{resultsViewMode !== "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" hidden />}{resultsViewMode === "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" tabIndex={0}><CompactResults rows={visibleResultRows} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} /></div>}{resultsViewMode !== "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" hidden />}{resultsViewMode === "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" tabIndex={0}><TopResults rows={rankingRows} topMetric={topMetric} onTopMetricChange={setTopMetric} previousByAccount={topPreviousByAccount} displayNameOverrides={displayNameOverrides} onDownloadImage={downloadTop15Image} availableDates={topAvailableDates} selectedDate={selectedTopDate} onDateChange={setTopDate} comparisonTargetDate={topComparisonTargetDate} onComparisonDateChange={setTopComparisonDate} expanded={topExpanded} onToggleExpanded={() => setTopExpanded((current) => !current)} /></div>}{resultsViewMode !== "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" hidden />}</div> : activeTab === "chart" ? <div key={activeTab} className="chart-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-chart" aria-labelledby="dashboard-tab-chart" tabIndex={0}><div className="section-heading"><div><p className="eyebrow">VISUAL ANALYSIS</p><h2>グラフ表示</h2></div><div className="mode-switch" role="tablist" aria-label="グラフモード" onKeyDown={(event) => handleTabListKeyDown(event, ["compare", "trend"] as const, (value) => setChartMode(value))}><button id="chart-mode-tab-compare" aria-controls="chart-mode-panel-compare" tabIndex={chartMode === "compare" ? 0 : -1} role="tab" aria-selected={chartMode === "compare"} className={chartMode === "compare" ? "is-active" : ""} type="button" onClick={() => setChartMode("compare")}>比較</button><button id="chart-mode-tab-trend" aria-controls="chart-mode-panel-trend" tabIndex={chartMode === "trend" ? 0 : -1} role="tab" aria-selected={chartMode === "trend"} className={chartMode === "trend" ? "is-active" : ""} type="button" onClick={() => setChartMode("trend")}>推移</button></div></div>
+        {activeTab === "results" ? <div key={activeTab} className="table-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-results" aria-labelledby="dashboard-tab-results" tabIndex={0}><div className="section-heading"><div><h2>取得データ</h2></div><div className="results-heading-actions">{selectedResultDate && resultsViewMode !== "top10" && <AppBadge>{selectedResultDate}</AppBadge>}<StatusFilter selected={statusFilter} onChange={setStatusFilter} /><div className="results-view-tabs" role="tablist" aria-label="取得データの表示形式" onKeyDown={(event) => handleTabListKeyDown(event, ["table", "compact", "top10"] as const, (value) => setResultsViewMode(value))}><button id="results-view-tab-table" type="button" role="tab" aria-selected={resultsViewMode === "table"} aria-controls="results-view-panel-table" tabIndex={resultsViewMode === "table" ? 0 : -1} className={resultsViewMode === "table" ? "is-active" : ""} onClick={() => setResultsViewMode("table")}>通常</button><button id="results-view-tab-compact" type="button" role="tab" aria-selected={resultsViewMode === "compact"} aria-controls="results-view-panel-compact" tabIndex={resultsViewMode === "compact" ? 0 : -1} className={resultsViewMode === "compact" ? "is-active" : ""} onClick={() => setResultsViewMode("compact")}>コンパクト</button><button id="results-view-tab-top10" type="button" role="tab" aria-selected={resultsViewMode === "top10"} aria-controls="results-view-panel-top10" tabIndex={resultsViewMode === "top10" ? 0 : -1} className={resultsViewMode === "top10" ? "is-active" : ""} onClick={() => setResultsViewMode("top10")}>ランキング</button></div></div></div>{resultsViewMode !== "top10" && <DateCalendar key={selectedResultDate} availableDates={resultAvailableDates} selectedDate={selectedResultDate} onDateChange={setResultDate} />}{resultsViewMode === "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" tabIndex={0}><ResultsTable rows={visibleResultRows} onSort={handleSort} sortKey={sortKey} direction={sortDirection} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} onDisplayNameChange={updateDisplayName} /></div>}{resultsViewMode !== "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" hidden />}{resultsViewMode === "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" tabIndex={0}><CompactResults rows={visibleResultRows} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} /></div>}{resultsViewMode !== "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" hidden />}{resultsViewMode === "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" tabIndex={0}><TopResults rows={rankingRows} topMetric={topMetric} onTopMetricChange={setTopMetric} previousByAccount={topPreviousByAccount} displayNameOverrides={displayNameOverrides} onDownloadImage={downloadTop15Image} availableDates={topAvailableDates} selectedDate={selectedTopDate} onDateChange={setTopDate} comparisonTargetDate={topComparisonTargetDate} onComparisonDateChange={setTopComparisonDate} expanded={topExpanded} onToggleExpanded={() => setTopExpanded((current) => !current)} /></div>}{resultsViewMode !== "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" hidden />}</div> : activeTab === "chart" ? <div key={activeTab} className="chart-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-chart" aria-labelledby="dashboard-tab-chart" tabIndex={0}><div className="section-heading"><div><h2>グラフ表示</h2></div><div className="mode-switch" role="tablist" aria-label="グラフモード" onKeyDown={(event) => handleTabListKeyDown(event, ["compare", "trend"] as const, (value) => setChartMode(value))}><button id="chart-mode-tab-compare" aria-controls="chart-mode-panel-compare" tabIndex={chartMode === "compare" ? 0 : -1} role="tab" aria-selected={chartMode === "compare"} className={chartMode === "compare" ? "is-active" : ""} type="button" onClick={() => setChartMode("compare")}>比較</button><button id="chart-mode-tab-trend" aria-controls="chart-mode-panel-trend" tabIndex={chartMode === "trend" ? 0 : -1} role="tab" aria-selected={chartMode === "trend"} className={chartMode === "trend" ? "is-active" : ""} type="button" onClick={() => setChartMode("trend")}>推移</button></div></div>
           <div className={`chart-controls chart-controls-primary ${chartMode === "trend" ? "chart-controls-unified" : ""}`}>
             <label className="chart-title-control"><span>グラフタイトル</span><input type="text" value={chartTitle} onChange={(event) => setChartTitle(event.target.value)} placeholder="任意のタイトル" /></label><label><span>タイトル文字サイズ（pt）</span><input type="number" min="6" max="24" step="0.5" value={chartTitleFontSize} onChange={(event) => setChartTitleFontSize(Math.min(24, Math.max(6, Number(event.target.value) || 6)))} /></label>
             <label><span>指標</span><select value={effectiveChartMetric} onChange={(event) => setMetric(event.target.value as ChartMetric)}>{Object.entries(chartMetricLabels).map(([key, label]) => <option key={key} value={key} disabled={(chartMode === "trend" && (isChartDeltaMetric(key as ChartMetric) || key === "postsPerFollower")) || (chartMode === "compare" && key === "followersCumulativeDelta")}>{label}</option>)}</select></label>
