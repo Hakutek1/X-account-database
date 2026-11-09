@@ -12,7 +12,7 @@ test("handle entry accepts bare names, optional @, separators, and X profile URL
 });
 
 test("handle entry rejects non-X URLs and invalid handle syntax", () => {
-  const result = parseHandleTargetInput("https://example.com/user\n@two words\nthis_handle_is_too_long");
+  const result = parseHandleTargetInput("https://example.com/user\n@two-name\nthis_handle_is_too_long");
   assert.deepEqual(result.handles, []);
   assert.equal(result.errors.length, 3);
 });
