@@ -66,6 +66,6 @@ test("history reads retain snapshot avatars when the column exists", async () =>
 
 test("the pending avatar migration cannot fail on a column already created by ensureSchema", async () => {
   const migration = await readFile(new URL("../drizzle/0014_add_avatar_fields.sql", import.meta.url), "utf8");
-  assert.match(migration, /^\s*SELECT\s+1\s*;\s*$/i);
+  assert.equal(migration.replace(/--.*$/gm, "").trim(), "SELECT 1;");
   assert.doesNotMatch(migration, /ALTER\s+TABLE/i);
 });

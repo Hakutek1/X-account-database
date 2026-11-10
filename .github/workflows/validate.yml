@@ -24,7 +24,7 @@ jobs:
         run: npm run lint
       - name: Confirm no known dependency vulnerabilities
         run: npm audit
-      - name: Apply 0013–0014 to a disposable D1 and verify preserved data
+      - name: Apply 0013–0014 to a disposable D1 with a preexisting avatar column
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +59,8 @@ jobs:
           persist="$RUNNER_TEMP/d1-state"
           npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-before.jsonc" --persist-to "$persist"
           cat > "$RUNNER_TEMP/seed.sql" <<'SQL'
+          -- Simulate the production schema drift: ensureSchema added this column before migration 0014 was recorded.
+          ALTER TABLE xstats_snapshots ADD COLUMN avatar_url TEXT;
           INSERT INTO xstats_sessions (id, created_at, last_seen_at) VALUES ('d1-removal-test', '2026-10-29T00:00:00.000Z', '2026-10-29T00:00:00.000Z');
           INSERT INTO xstats_account_statuses (session_id, account_id, status, joined_at, updated_at) VALUES ('d1-removal-test', 'retained-account', 'suspended', '2020-01-02', '2026-10-29T00:00:00.000Z');
           INSERT INTO xstats_daily_history (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at) VALUES ('history-row-1', 'd1-removal-test', '2020-01-02', 'history-account', 'history-account', 'History Account', 100, 20, 5, '2026-10-29T00:00:00.000Z', 'manual', '2026-10-29T00:00:00.000Z');
