@@ -1168,6 +1168,8 @@ export default function Home() {
   const [isAccountEditorOpen, setIsAccountEditorOpen] = useState(false);
   const [accountEditorDraft, setAccountEditorDraft] = useState("");
   const [accountEditorFeedback, setAccountEditorFeedback] = useState<string | null>(null);
+  const [accountTargetsCopied, setAccountTargetsCopied] = useState(false);
+  const accountTargetsCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [rows, setRows] = useState<AccountRow[]>([]);
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
   const [latestCollection, setLatestCollection] = useState<LatestCollection | null>(null);
@@ -2043,7 +2045,7 @@ export default function Home() {
                 </div>
                 <div className="account-target-heading">
                   <h3>登録アカウント一覧</h3>
-                  <button type="button" className="secondary-button" disabled={!accountTargetHandles.length} aria-label="登録アカウントを改行区切りでコピー" onClick={async () => { try { await navigator.clipboard.writeText(accountTargetHandles.map((handle) => `@${handle}`).join("\n")); setAccountEditorFeedback(`${accountTargetHandles.length}件のアカウントをコピーしました。`); } catch { setAccountEditorFeedback("クリップボードへコピーできませんでした。"); } }}>一覧をコピー</button>
+                  <button type="button" className={`secondary-button account-copy-button${accountTargetsCopied ? " is-copied" : ""}`} disabled={!accountTargetHandles.length} aria-label={accountTargetsCopied ? "登録アカウントをコピーしました" : "登録アカウントを改行区切りでコピー"} onClick={async () => { try { await navigator.clipboard.writeText(accountTargetHandles.map((handle) => `@${handle}`).join("\n")); setAccountEditorFeedback(`${accountTargetHandles.length}件のアカウントをコピーしました。`); setAccountTargetsCopied(true); if (accountTargetsCopyTimerRef.current) clearTimeout(accountTargetsCopyTimerRef.current); accountTargetsCopyTimerRef.current = setTimeout(() => { setAccountTargetsCopied(false); accountTargetsCopyTimerRef.current = null; }, 1800); } catch { setAccountTargetsCopied(false); setAccountEditorFeedback("クリップボードへコピーできませんでした。"); } }}>{accountTargetsCopied ? "✓ コピーしました" : "一覧をコピー"}</button>
                   <span>{accountTargetHandles.length}件</span>
                 </div>
                 {accountTargetHandles.length ? <ul className="account-target-list" aria-label="取得対象アカウント">

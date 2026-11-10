@@ -789,6 +789,8 @@ html[data-theme="dark"] .selected-only-toggle.is-active { color: var(--teal); }
 .account-target-heading { margin: 24px 0 10px; }
 .account-target-heading h3 { margin: 0; font-size: 14px; }
 .account-target-heading span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.account-copy-button.is-copied { color: #176f5e; border-color: #8acdbb; background: #eef9f5; }
+html[data-theme="dark"] .account-copy-button.is-copied { color: #a2e2d0; border-color: #32877b; background: #153d3b; }
 .account-target-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; max-height: 330px; min-height: 54px; margin: 0; padding: 12px; overflow: auto; list-style: none; border: 1px solid var(--silver-soft); border-radius: 12px; background: var(--surface-subtle); }
 .account-target-chip { display: inline-flex; align-items: center; gap: 8px; width: max-content; max-width: 100%; padding: 4px 5px 4px 12px; border: 1px solid var(--silver-soft); border-radius: 999px; color: var(--ink); background: var(--card); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
 .account-target-chip > span { min-width: 0; }
