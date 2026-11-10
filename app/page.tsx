@@ -2043,6 +2043,7 @@ export default function Home() {
                 </div>
                 <div className="account-target-heading">
                   <h3>登録アカウント一覧</h3>
+                  <button type="button" className="secondary-button" disabled={!accountTargetHandles.length} aria-label="登録アカウントを改行区切りでコピー" onClick={async () => { try { await navigator.clipboard.writeText(accountTargetHandles.map((handle) => `@${handle}`).join("\n")); setAccountEditorFeedback(`${accountTargetHandles.length}件のアカウントをコピーしました。`); } catch { setAccountEditorFeedback("クリップボードへコピーできませんでした。"); } }}>一覧をコピー</button>
                   <span>{accountTargetHandles.length}件</span>
                 </div>
                 {accountTargetHandles.length ? <ul className="account-target-list" aria-label="取得対象アカウント">
