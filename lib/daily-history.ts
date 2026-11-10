@@ -433,9 +433,16 @@ type RawSnapshot = {
 };
 
 export async function loadEffectiveHistory(database: D1Database, sessionId: string) {
+  // Some databases created before migration 0014 already gained this column
+  // through ensureSchema, while fresh databases add it on their first write.
+  // Inspect the schema so this read-only API can work safely in both states.
+  const snapshotColumns = await database.prepare('PRAGMA table_info("xstats_snapshots")').all<{ name: string }>();
+  const hasSnapshotAvatarUrl = snapshotColumns.results.some((column) => column.name === "avatar_url");
+  const snapshotAvatarUrl = hasSnapshotAvatarUrl ? "snapshots.avatar_url" : "NULL";
+
   const [raw, daily] = await Promise.all([
     database.prepare(`SELECT snapshots.id, snapshots.run_id, snapshots.fetched_at, snapshots.account_id, snapshots.handle, snapshots.display_name,
-      snapshots.followers, snapshots.following, snapshots.posts, COALESCE(assets.avatar_url, snapshots.avatar_url) AS avatar_url,
+      snapshots.followers, snapshots.following, snapshots.posts, COALESCE(assets.avatar_url, ${snapshotAvatarUrl}) AS avatar_url,
       COALESCE(statuses.status, 'active') AS account_status, statuses.joined_at AS joined
       FROM xstats_snapshots AS snapshots LEFT JOIN xstats_account_assets AS assets
       ON assets.session_id = snapshots.session_id AND assets.account_id = snapshots.account_id
@@ -470,7 +477,6 @@ export async function loadEffectiveHistory(database: D1Database, sessionId: stri
     }));
   return [...rawAfterCutoff, ...dailyRows].sort((left, right) => new Date(left.fetched_at).getTime() - new Date(right.fetched_at).getTime() || left.handle.localeCompare(right.handle, "ja"));
 }
-
 export function metricLabel(metric: DailyHistoryMetric) {
   return metric === "followers" ? "フォロワー数" : metric === "following" ? "フォロー数" : "投稿数";
 }
