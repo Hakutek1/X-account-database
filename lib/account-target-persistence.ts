@@ -1,4 +1,4 @@
-import { normalizeStoredHandleTargets } from "./account-targets";
+import { normalizeStoredHandleTargets } from "./account-targets.ts";
 
 export const ACCOUNT_TARGETS_STORAGE_KEY = "x-account-stats-account-targets-v1";
 const MAX_ACCOUNT_TARGETS = 500;
