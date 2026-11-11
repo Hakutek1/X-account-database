@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import {
   ACCOUNT_TARGETS_STORAGE_KEY,
   clearCachedDashboardAccountData,
@@ -105,4 +106,13 @@ test("clipboard helper reports failure when the fallback cannot copy", async () 
     /コピーできませんでした/,
   );
   assert.equal(textarea.removed, true);
+});
+
+test("dashboard wires target storage to login/logout and uses the clipboard fallback helper", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /loadPersistedAccountTargets\(window\.localStorage, DASHBOARD_STORAGE_KEY\)/);
+  assert.match(page, /savePersistedAccountTargets\(window\.localStorage/);
+  assert.match(page, /clearCachedDashboardAccountData\(window\.localStorage, DASHBOARD_STORAGE_KEY\)/);
+  assert.match(page, /copyTextToClipboard\(formatHandleTargetsForClipboard\(accountTargetHandles\)\)/);
+  assert.doesNotMatch(page, /navigator\.clipboard\.writeText/);
 });
