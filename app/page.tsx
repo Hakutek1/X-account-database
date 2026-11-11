@@ -10,7 +10,9 @@ import HistoricalDataEditor from "./historical-data-editor";
 import { resolveLinearAxisDomain } from "../lib/chart-axis";
 import { FALLBACK_SITE_VERSION_NUMBER, formatSiteVersion } from "../lib/site-version";
 import { CHART_DATA_PAGE_SIZE, filterChartPickerAccounts, getNextChartMarkIndex, getRovingTabIndex, groupChartPickerAccounts, paginateChartRows, updateChartSelection } from "../lib/chart-accessibility";
-import { addHandleTargets, normalizeStoredHandleTargets, parseHandleTargetInput, removeHandleTarget } from "../lib/account-targets";
+import { addHandleTargets, formatHandleTargetsForClipboard, normalizeStoredHandleTargets, parseHandleTargetInput, removeHandleTarget } from "../lib/account-targets";
+import { clearCachedDashboardAccountData, loadPersistedAccountTargets, savePersistedAccountTargets } from "../lib/account-target-persistence";
+import { copyTextToClipboard } from "../lib/copy-to-clipboard";
 
 const MAX_ACCOUNTS = 500;
 const numberFormatter = new Intl.NumberFormat("ja-JP");
@@ -80,7 +82,7 @@ type ExportRow = {
   posts: number | null;
 };
 type PreviousMetrics = { followers: number | null; following: number | null; posts: number | null };
-type PersistedDashboardState = { accountInput?: string; rows?: AccountRow[]; selectedHandles?: string[]; statusFilter?: StatusCategory[]; chartStatusFilter?: AccountStatus[]; theme?: Theme; displayNameOverrides?: Record<string, string>; legendColors?: Record<string, string>; barColor?: string; chartTitle?: string; chartTitleFontSize?: number; trendLineWidth?: number; markerSize?: number; markerOutlineWidth?: number; markerOutlineColor?: string; trendValueFontSize?: number; trendAxisFontSize?: number; trendDateFontSize?: number; trendValueLabelColor?: "series" | "black"; compareLabelFontSize?: number; showTrendLegend?: boolean; logScale?: boolean };
+type PersistedDashboardState = { rows?: AccountRow[]; selectedHandles?: string[]; statusFilter?: StatusCategory[]; chartStatusFilter?: AccountStatus[]; theme?: Theme; displayNameOverrides?: Record<string, string>; legendColors?: Record<string, string>; barColor?: string; chartTitle?: string; chartTitleFontSize?: number; trendLineWidth?: number; markerSize?: number; markerOutlineWidth?: number; markerOutlineColor?: string; trendValueFontSize?: number; trendAxisFontSize?: number; trendDateFontSize?: number; trendValueLabelColor?: "series" | "black"; compareLabelFontSize?: number; showTrendLegend?: boolean; logScale?: boolean };
 
 const NETWORK_RETRY_COUNT = 2;
 const NETWORK_RETRY_DELAY_MS = 700;
@@ -1267,14 +1269,14 @@ export default function Home() {
     setLegendColors({});
     chartSelectionInitialized.current = false;
     try {
-      const saved = window.localStorage.getItem(DASHBOARD_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, unknown>;
-        for (const key of ["accountInput", "rows", "selectedHandles", "displayNameOverrides", "legendColors"]) delete parsed[key];
-        window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(parsed));
+      const storedTargets = loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY);
+      const currentTargets = normalizeStoredHandleTargets(accountInput).handles;
+      if (isAdmin && (currentTargets.length > 0 || storedTargets.length === 0)) {
+        savePersistedAccountTargets(window.localStorage, currentTargets);
       }
+      clearCachedDashboardAccountData(window.localStorage, DASHBOARD_STORAGE_KEY);
     } catch {
-      window.localStorage.removeItem(DASHBOARD_STORAGE_KEY);
+      // Preserve a working logout even when browser storage is unavailable.
     }
   };
 
@@ -1388,7 +1390,7 @@ export default function Home() {
       const saved = window.localStorage.getItem(DASHBOARD_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as PersistedDashboardState;
-        if (canReadAccountData && typeof parsed.accountInput === "string") setAccountInput(parsed.accountInput);
+        if (isAdmin) setAccountInput(loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY).join("\n"));
         if (canReadAccountData && Array.isArray(parsed.selectedHandles)) {
           chartSelectionInitialized.current = true;
           setSelectedHandles(parsed.selectedHandles.filter((handle): handle is string => typeof handle === "string").map((handle) => handle.toLowerCase()));
@@ -1426,12 +1428,21 @@ export default function Home() {
     if (!isHydrated || !isReadAccessReady) return;
     const canReadAccountData = readMode === "public" || isAdmin;
     try {
-      const state: PersistedDashboardState = { ...(canReadAccountData ? { accountInput, selectedHandles, displayNameOverrides, legendColors } : {}), statusFilter, chartStatusFilter, theme, barColor: barColor ?? undefined, chartTitle, chartTitleFontSize, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, showTrendLegend, logScale };
+      const state: PersistedDashboardState = { ...(canReadAccountData ? { selectedHandles, displayNameOverrides, legendColors } : {}), statusFilter, chartStatusFilter, theme, barColor: barColor ?? undefined, chartTitle, chartTitleFontSize, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, showTrendLegend, logScale };
       window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(state));
     } catch {
       // A full or restricted localStorage should not block data collection.
     }
-  }, [accountInput, barColor, chartStatusFilter, chartTitle, chartTitleFontSize, compareLabelFontSize, displayNameOverrides, isHydrated, isReadAccessReady, isAdmin, legendColors, logScale, markerOutlineColor, markerOutlineWidth, markerSize, readMode, selectedHandles, showTrendLegend, statusFilter, theme, trendAxisFontSize, trendDateFontSize, trendLineWidth, trendValueFontSize, trendValueLabelColor]);
+  }, [barColor, chartStatusFilter, chartTitle, chartTitleFontSize, compareLabelFontSize, displayNameOverrides, isHydrated, isReadAccessReady, isAdmin, legendColors, logScale, markerOutlineColor, markerOutlineWidth, markerSize, readMode, selectedHandles, showTrendLegend, statusFilter, theme, trendAxisFontSize, trendDateFontSize, trendLineWidth, trendValueFontSize, trendValueLabelColor]);
+
+  useEffect(() => {
+    if (!isHydrated || !isReadAccessReady || !isAdmin) return;
+    try {
+      savePersistedAccountTargets(window.localStorage, normalizeStoredHandleTargets(accountInput).handles);
+    } catch {
+      // A restricted localStorage should not block account collection.
+    }
+  }, [accountInput, isAdmin, isHydrated, isReadAccessReady]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2045,7 +2056,7 @@ export default function Home() {
                 </div>
                 <div className="account-target-heading">
                   <h3>登録アカウント一覧</h3>
-                  <button type="button" className={`secondary-button account-copy-button${accountTargetsCopied ? " is-copied" : ""}`} disabled={!accountTargetHandles.length} aria-label={accountTargetsCopied ? "登録アカウントをコピーしました" : "登録アカウントを改行区切りでコピー"} onClick={async () => { try { await navigator.clipboard.writeText(accountTargetHandles.map((handle) => `@${handle}`).join("\n")); setAccountEditorFeedback(`${accountTargetHandles.length}件のアカウントをコピーしました。`); setAccountTargetsCopied(true); if (accountTargetsCopyTimerRef.current) clearTimeout(accountTargetsCopyTimerRef.current); accountTargetsCopyTimerRef.current = setTimeout(() => { setAccountTargetsCopied(false); accountTargetsCopyTimerRef.current = null; }, 1800); } catch { setAccountTargetsCopied(false); setAccountEditorFeedback("クリップボードへコピーできませんでした。"); } }}>{accountTargetsCopied ? "✓ コピーしました" : "一覧をコピー"}</button>
+                  <button type="button" className={`secondary-button account-copy-button${accountTargetsCopied ? " is-copied" : ""}`} disabled={!accountTargetHandles.length} aria-label={accountTargetsCopied ? "登録アカウントをコピーしました" : "登録アカウントを改行区切りでコピー"} onClick={async () => { try { await copyTextToClipboard(formatHandleTargetsForClipboard(accountTargetHandles)); setAccountEditorFeedback(`${accountTargetHandles.length}件のアカウントをコピーしました。`); setAccountTargetsCopied(true); if (accountTargetsCopyTimerRef.current) clearTimeout(accountTargetsCopyTimerRef.current); accountTargetsCopyTimerRef.current = setTimeout(() => { setAccountTargetsCopied(false); accountTargetsCopyTimerRef.current = null; }, 1800); } catch { setAccountTargetsCopied(false); setAccountEditorFeedback("クリップボードへコピーできませんでした。"); } }}>{accountTargetsCopied ? "✓ コピーしました" : "一覧をコピー"}</button>
                   <span>{accountTargetHandles.length}件</span>
                 </div>
                 {accountTargetHandles.length ? <ul className="account-target-list" aria-label="取得対象アカウント">
