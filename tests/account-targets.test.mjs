@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   addHandleTargets,
+  formatHandleTargetsForClipboard,
   normalizeStoredHandleTargets,
   parseHandleTargetInput,
   removeHandleTarget,
@@ -39,4 +40,8 @@ test("batch parsing returns malformed tokens while preserving valid handles", ()
   const result = parseHandleTargetInput("good @bad-name https://not-x.example/a");
   assert.deepEqual(result.handles, ["good"]);
   assert.deepEqual(result.errors, ["@bad-name", "https://not-x.example/a"]);
+});
+
+test("clipboard text uses one @handle per line and removes duplicate targets", () => {
+  assert.equal(formatHandleTargetsForClipboard(["alpha", "@Beta", "ALPHA"]), "@alpha\n@Beta");
 });

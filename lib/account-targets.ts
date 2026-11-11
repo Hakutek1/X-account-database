@@ -81,3 +81,7 @@ export function removeHandleTarget(handles: string[], target: string) {
   const targetKey = target.replace(/^@/, "").toLowerCase();
   return handles.filter((handle) => handle.replace(/^@/, "").toLowerCase() !== targetKey);
 }
+
+export function formatHandleTargetsForClipboard(handles: string[]) {
+  return uniqueHandles(handles.map((handle) => handle.replace(/^@/, ""))).map((handle) => `@${handle}`).join("\n");
+}
