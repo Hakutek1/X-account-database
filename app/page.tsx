@@ -1330,6 +1330,7 @@ export default function Home() {
       const response = await fetch(`${window.location.origin}/api/admin/login`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ key: adminKeyInput }) });
       const payload = (await response.json().catch(() => ({}))) as AdminStatus;
       if (!response.ok) throw new Error(payload.error ?? "管理者ログインに失敗しました。");
+      setAccountInput(loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY).join("\n"));
       setIsAdmin(true);
       setAdminKeyInput("");
       setAdminLoginOpen(false);
