@@ -1,7 +1,7 @@
-import { getD1, getSharedSession, json, requireReadAccess } from "../../_shared";
+import { getD1, getSharedSession, json, requireAdmin } from "../../_shared";
 
 export async function GET(request: Request) {
-  const denied = await requireReadAccess(request);
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   const session = getSharedSession();
   try {

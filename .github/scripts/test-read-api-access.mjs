@@ -47,16 +47,16 @@ assert.equal((await request("/api/site-version")).response.status, 200);
 const reads = [
   { path: "/api/history", publicStatus: 200 },
   { path: "/api/avatar?accountId=missing-read-test", publicStatus: 404 },
-  { path: "/api/import/mappings", publicStatus: 200 },
-  { path: "/api/admin/historical-data?metric=followers", publicStatus: 200 },
-  { path: "/api/admin/nflf-duplicate", publicStatus: 200 },
-  { path: "/api/microsoft/status", publicStatus: 200 },
-  { path: "/api/microsoft/files", publicStatus: 503 },
+  { path: "/api/import/mappings", publicStatus: 200, adminOnly: true },
+  { path: "/api/admin/historical-data?metric=followers", publicStatus: 200, adminOnly: true },
+  { path: "/api/admin/nflf-duplicate", publicStatus: 200, adminOnly: true },
+  { path: "/api/microsoft/status", publicStatus: 200, adminOnly: true },
+  { path: "/api/microsoft/files", publicStatus: 503, adminOnly: true },
 ];
 
 for (const item of reads) {
   const { response, body } = await request(item.path);
-  const expected = mode === "private" ? 403 : item.publicStatus;
+  const expected = mode === "private" || item.adminOnly ? 403 : item.publicStatus;
   assert.equal(response.status, expected, `${mode} anonymous GET ${item.path}: ${JSON.stringify(body)}`);
   if (response.status !== 403) {
     const serialized = JSON.stringify(body);

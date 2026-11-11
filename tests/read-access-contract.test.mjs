@@ -17,17 +17,25 @@ test("all data read routes enforce the selected read mode and stay read-only", a
   const routes = [
     ["app/api/history/route.ts", "GET", "requireReadAccess"],
     ["app/api/avatar/route.ts", "GET", "requireReadAccess"],
-    ["app/api/import/mappings/route.ts", "GET", "requireReadAccess"],
-    ["app/api/admin/historical-data/route.ts", "GET", "requireReadAccess"],
-    ["app/api/admin/nflf-duplicate/route.ts", "GET", "requireReadAccess"],
-    ["app/api/microsoft/files/route.ts", "GET", "requireReadAccess"],
-    ["app/api/microsoft/status/route.ts", "GET", "requireReadAccess"],
   ];
   const writes = /\b(?:ensureSchema|ensureSharedSession|ensureDailyHistory|ensureDailyPostsThroughToday|ensureOpeningDateHistory|ensureAccountStatuses|pruneSessionHistory|prepareEditorContext)\s*\(/;
   for (const [path, method, gate] of routes) {
     const body = methodBody(await source(path), method);
     assert.ok(body.includes(gate), `${path} must apply ${gate}`);
     assert.doesNotMatch(body, writes, `${path} must not perform maintenance during GET`);
+  }
+});
+
+test("management and integration read routes remain administrator-only", async () => {
+  const routes = [
+    ["app/api/import/mappings/route.ts", "GET"],
+    ["app/api/admin/historical-data/route.ts", "GET"],
+    ["app/api/admin/nflf-duplicate/route.ts", "GET"],
+    ["app/api/microsoft/files/route.ts", "GET"],
+    ["app/api/microsoft/status/route.ts", "GET"],
+  ];
+  for (const [path, method] of routes) {
+    assert.ok(methodBody(await source(path), method).includes("requireAdmin"), `${path} must stay administrator-only`);
   }
 });
 

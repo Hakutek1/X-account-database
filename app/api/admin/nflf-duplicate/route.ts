@@ -1,4 +1,4 @@
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin, requireReadAccess } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin } from "../../_shared";
 
 const TARGET_HANDLE = "nflf";
 const TARGET_DATE = "2026-07-25";
@@ -21,7 +21,7 @@ async function findCandidates(db: D1Database = getD1(), session = getSharedSessi
 }
 
 export async function GET(request: Request) {
-  const denied = await requireReadAccess(request);
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try { return json({ handle: TARGET_HANDLE, targetDate: TARGET_DATE, candidates: (await findCandidates()).rows }); }
   catch (error) { return json({ error: error instanceof Error ? error.message : "NFLFの重複データを確認できませんでした。" }, { status: 500 }); }
