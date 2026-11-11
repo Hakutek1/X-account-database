@@ -1,4 +1,4 @@
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin, requireAdmin } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin } from "../../_shared";
 
 const TARGET_HANDLE = "nflf";
 const TARGET_DATE = "2026-07-25";
