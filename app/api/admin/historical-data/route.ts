@@ -1,7 +1,7 @@
 import { dailyRecordDate, ensureDailyHistory, ensureDailyPostsThroughToday, ensureOpeningDateHistory, loadDailyHistory, loadDailyHistoryMeta, type DailyHistoryMetric, type DailyHistoryRow } from "../../../../lib/daily-history";
 import { loadAccountAssets } from "../../../../lib/account-assets";
 import { ensureAccountStatuses, isAccountStatus, loadAccountJoinedMap, loadAccountStatusMap, type AccountStatus } from "../../../../lib/account-status";
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin, requireReadAccess } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin, requireAdmin } from "../../_shared";
 
 const METRICS = new Set<DailyHistoryMetric>(["followers", "following", "posts"]);
 const MAX_ACCOUNTS = 500;
@@ -102,7 +102,7 @@ async function prepareEditorContext() {
 }
 
 export async function GET(request: Request) {
-  const denied = await requireReadAccess(request);
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   const metric = new URL(request.url).searchParams.get("metric");
   if (!isMetric(metric)) return json({ error: "指標が正しく指定されていません。" }, { status: 400 });
