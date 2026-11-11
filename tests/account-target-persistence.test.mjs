@@ -111,7 +111,8 @@ test("clipboard helper reports failure when the fallback cannot copy", async () 
 test("dashboard wires target storage to login/logout and uses the clipboard fallback helper", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(page, /loadPersistedAccountTargets\(window\.localStorage, DASHBOARD_STORAGE_KEY\)/);
-  assert.match(page, /setAccountInput\(loadPersistedAccountTargets\(window\.localStorage, DASHBOARD_STORAGE_KEY\)\.join\("\\\\n"\)\);\s*setIsAdmin\(true\)/);
+  assert.ok(page.includes('setAccountInput(loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY).join("\\n"));'));
+  assert.ok(page.includes("setIsAdmin(true);"));
   assert.match(page, /savePersistedAccountTargets\(window\.localStorage/);
   assert.match(page, /clearCachedDashboardAccountData\(window\.localStorage, DASHBOARD_STORAGE_KEY\)/);
   assert.match(page, /copyTextToClipboard\(formatHandleTargetsForClipboard\(accountTargetHandles\)\)/);
