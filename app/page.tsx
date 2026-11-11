@@ -1388,10 +1388,11 @@ export default function Home() {
     if (!isReadAccessReady) return;
     const canReadAccountData = readMode === "public" || isAdmin;
     try {
+      const savedTargets = loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY);
+      if (isAdmin) setAccountInput(savedTargets.join("\n"));
       const saved = window.localStorage.getItem(DASHBOARD_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as PersistedDashboardState;
-        if (isAdmin) setAccountInput(loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY).join("\n"));
         if (canReadAccountData && Array.isArray(parsed.selectedHandles)) {
           chartSelectionInitialized.current = true;
           setSelectedHandles(parsed.selectedHandles.filter((handle): handle is string => typeof handle === "string").map((handle) => handle.toLowerCase()));
