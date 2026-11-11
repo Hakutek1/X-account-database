@@ -1,7 +1,7 @@
 import { dailyRecordDate, ensureDailyHistory, ensureDailyPostsThroughToday, ensureOpeningDateHistory, loadDailyHistory, loadDailyHistoryMeta, type DailyHistoryMetric, type DailyHistoryRow } from "../../../../lib/daily-history";
 import { loadAccountAssets } from "../../../../lib/account-assets";
 import { ensureAccountStatuses, isAccountStatus, loadAccountJoinedMap, loadAccountStatusMap, type AccountStatus } from "../../../../lib/account-status";
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin, requireAdmin } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin } from "../../_shared";
 
 const METRICS = new Set<DailyHistoryMetric>(["followers", "following", "posts"]);
 const MAX_ACCOUNTS = 500;
