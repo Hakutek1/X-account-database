@@ -1,9 +1,9 @@
-import { json, requireReadAccess } from "../../_shared";
+import { json, requireAdmin } from "../../_shared";
 import { isAdminRequest } from "../../../../lib/admin-access";
 import { microsoftRuntimeConfig, requireMicrosoftConnection, withSessionCookie } from "../_shared";
 
 export async function GET(request: Request) {
-  const denied = await requireReadAccess(request);
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   const admin = await isAdminRequest(request);
   const config = microsoftRuntimeConfig();
