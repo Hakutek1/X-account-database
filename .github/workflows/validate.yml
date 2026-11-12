@@ -191,7 +191,7 @@ jobs:
           target_state="$(run_d1 "SELECT 'TARGETS|' || (SELECT COUNT(*) FROM xstats_account_targets WHERE session_id='xstats-public-shared') || '|HISTORY|' || (SELECT COUNT(*) FROM xstats_daily_history WHERE account_id='save-fixture') AS result")"
           printf '%s\n' "$target_state"
           printf '%s' "$target_state" | grep -E 'TARGETS\|1\|HISTORY\|4[0-9][0-9]' >/dev/null || { echo "Target or historical fixture data was not retained"; exit 1; }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: xstats-validation-screenshots
           path: ${{ runner.temp }}/xstats-preview/*.png
