@@ -233,11 +233,12 @@ try {
     assert.ok(await axisToggle.isVisible(), "graph settings should be collapsible on every screen size");
     assert.equal(await axisToggle.getAttribute("aria-expanded"), "false", "graph settings should start collapsed");
     await axisToggle.click();
-    assert.equal(await axisToggle.getAttribute("aria-expanded"), "true", "graph settings should open on demand");
+    const openedAxisToggle = page.getByRole("button", { name: "数値軸の設定を閉じる" });
+    assert.equal(await openedAxisToggle.getAttribute("aria-expanded"), "true", "graph settings should open on demand");
     const axisFields = page.locator(".chart-setting-disclosure .axis-settings").first();
     const fieldColumns = await axisFields.evaluate((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length);
     assert.equal(fieldColumns, viewport.name === "desktop" ? 2 : 1, "graph settings fields should adapt to screen width");
-    await axisToggle.click();
+    await openedAxisToggle.click();
     const accountDisclosureClose = page.getByRole("button", { name: "表示アカウントを閉じる" });
     if (await accountDisclosureClose.isVisible()) await accountDisclosureClose.click();
 
