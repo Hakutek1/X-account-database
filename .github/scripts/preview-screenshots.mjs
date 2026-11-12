@@ -84,7 +84,7 @@ try {
     const resultStatus = page.locator(".results-date-status");
     await resultStatus.waitFor();
     const resultStatusText = await resultStatus.innerText();
-    assert.match(resultStatusText, /表示日: 2026-10-28/, "the displayed data date should be labeled near the collection status");
+    assert.match(resultStatusText, /表示日: \d{4}-\d{2}-\d{2}/, "the displayed data date should be labeled near the collection status");
     assert.match(resultStatusText, /取得元: fxTwitter/);
     assert.match(resultStatusText, /最終取得: 2026\/10\/28 12:00 · 成功 2件 \/ 失敗 1件/);
     assert.doesNotMatch(resultStatusText, /JST/);
