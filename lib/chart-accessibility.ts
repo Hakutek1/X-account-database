@@ -11,8 +11,6 @@ export type ChartPickerGroup<T extends ChartPickerAccount = ChartPickerAccount> 
   rows: T[];
 };
 
-export const CHART_DATA_PAGE_SIZE = 50;
-
 export function filterChartPickerAccounts<T extends ChartPickerAccount>(
   rows: readonly T[],
   options: { query: string; selectedOnly: boolean; selectedHandles: readonly string[] },
@@ -42,20 +40,6 @@ export function updateChartSelection(
   const current = currentHandles.map((handle) => handle.toLocaleLowerCase("ja-JP"));
   if (!enabled) return current.filter((handle) => !visible.has(handle));
   return [...new Set([...current, ...visible])];
-}
-
-export function paginateChartRows<T>(rows: readonly T[], requestedPage: number, requestedPageSize = CHART_DATA_PAGE_SIZE) {
-  const pageSize = Number.isInteger(requestedPageSize) && requestedPageSize > 0 ? requestedPageSize : CHART_DATA_PAGE_SIZE;
-  const totalRows = rows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const page = Math.max(0, Math.min(Math.floor(requestedPage), totalPages - 1));
-  return {
-    page,
-    pageSize,
-    totalPages,
-    totalRows,
-    rows: rows.slice(page * pageSize, (page + 1) * pageSize),
-  };
 }
 
 export function getRovingTabIndex(currentIndex: number, key: string, count: number): number | null {
