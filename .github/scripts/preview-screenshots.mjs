@@ -240,7 +240,7 @@ try {
     await axisToggle.click();
     const accountDisclosureClose = page.getByRole("button", { name: "表示アカウントを閉じる" });
     if (await accountDisclosureClose.isVisible()) await accountDisclosureClose.click();
-    const themeButton = page.locator(".editorial-theme-toggle");
+
     const html = page.locator("html");
     if (await html.getAttribute("data-theme") !== "dark") await themeButton.click();
     await page.screenshot({ path: join(outputDirectory, "graph-" + viewport.name + "-dark.png"), fullPage: true });
