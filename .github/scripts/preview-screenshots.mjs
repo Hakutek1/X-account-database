@@ -57,7 +57,7 @@ try {
     });
     await page.route("**/api/history", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(historyResponse) }));
     await page.route("**/api/admin/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, isAdmin: true, readMode: "public" }) }));
-    await page.route("**/api/admin/account-targets", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ handles: [], revision: 0, initialized: true }) }));
+    await page.route("**/api/admin/account-targets", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ handles: ["account_a", "account_b"], revision: 0, initialized: true }) }));
     await page.route("**/api/admin/historical-data**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       metric: "followers",
       revision: 1,
@@ -91,7 +91,7 @@ try {
     assert.equal(await page.locator(".topbar .collection-status-meta").count(), 0, "collection status should no longer be in the global header");
     assert.equal(await page.getByText("調べたいアカウントを追加", { exact: true }).count(), 0);
     assert.equal(await page.locator(".hero-section .input-card .section-heading").count(), 0, "top account prompt and limit badge should be removed");
-    assert.equal(await page.locator(".hero-section .input-count").innerText(), "2件登録");
+    assert.equal(await page.locator(".input-footer .input-count").innerText(), "2件登録");
     const editButton = page.getByRole("button", { name: "登録アカウントを編集", exact: true });
     const collectButton = page.getByRole("button", { name: /データを取得する/ });
     const editBox = await editButton.boundingBox();
