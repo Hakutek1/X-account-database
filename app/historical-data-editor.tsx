@@ -344,7 +344,6 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   return <div className="historical-editor panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-historical" aria-labelledby="dashboard-tab-historical" tabIndex={0} aria-label="過去データ追加" aria-busy={editorBusy}>
     <div className="section-heading historical-editor-toolbar">
       <div>
-        <p className="eyebrow">ADMINISTRATOR EDITOR</p>
         <h2>過去データ追加</h2>
         <p className="historical-editor-help">Excelの日次履歴と同じ形式です。日付・アカウント・数値を管理者が編集できます。</p>
       </div>
