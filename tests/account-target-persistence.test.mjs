@@ -83,10 +83,10 @@ test("saving an empty target list is preserved as empty", () => {
 test("device-only account targets remain available for explicit merge while shared targets change", () => {
   const storage = new MemoryStorage();
   saveLocallySavedAccountTargets(storage, ["legacy", "shared"]);
-  savePersistedAccountTargets(storage, ["shared", "new-shared"]);
+  savePersistedAccountTargets(storage, ["shared", "newshared"]);
 
   assert.deepEqual(loadLocallySavedAccountTargets(storage), ["legacy", "shared"]);
-  assert.deepEqual(loadPersistedAccountTargets(storage, "dashboard"), ["shared", "new-shared"]);
+  assert.deepEqual(loadPersistedAccountTargets(storage, "dashboard"), ["shared", "newshared"]);
   assert.deepEqual(JSON.parse(storage.getItem(ACCOUNT_TARGETS_LOCAL_BACKUP_KEY)), ["legacy", "shared"]);
 });
 
