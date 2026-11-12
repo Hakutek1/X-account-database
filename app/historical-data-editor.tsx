@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ACCOUNT_STATUS_LABELS, ACCOUNT_STATUSES, isAccountStatus, type AccountStatus } from "../lib/account-status";
 import { getRovingTabIndex } from "../lib/chart-accessibility";
+import ExternalAvatarImage from "./external-avatar-image";
 
 type MetricKey = "followers" | "following" | "posts";
 type AccountField = "accountId" | "handle" | "displayName" | "status";

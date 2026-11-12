@@ -1,5 +1,5 @@
 import { addHandleTargets, normalizeStoredHandleTargets, removeHandleTarget } from "../../../../lib/account-targets";
-import { ensureSchema, getD1, getSharedSession, json, requireAdmin } from "../../_shared";
+import { ensureAccountTargetsSchema, getD1, getSharedSession, json, requireAdmin } from "../../_shared";
 
 const MAX_TARGETS = 500;
 
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
-    await ensureSchema();
+    await ensureAccountTargetsSchema();
     const row = await currentTargets(getD1(), getSharedSession().id);
     return jsonNoStore(serialize(row));
   } catch {
@@ -72,7 +72,7 @@ export async function PUT(request: Request) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       return jsonNoStore({ error: "一覧の版情報が正しくありません。" }, { status: 400 });
     }
-    await ensureSchema();
+    await ensureAccountTargetsSchema();
     const db = getD1();
     const sessionId = getSharedSession().id;
     const current = await currentTargets(db, sessionId);

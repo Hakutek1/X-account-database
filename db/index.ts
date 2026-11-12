@@ -21,7 +21,6 @@ export function getDb() {
 export async function ensureSchema(database: D1Database = getD1()) {
   const db = database;
   await db.batch([
-    db.prepare(schemaSql.accountTargets),
     db.prepare(schemaSql.sessions),
     db.prepare(schemaSql.runs),
     db.prepare(schemaSql.snapshots),
@@ -61,6 +60,10 @@ export async function ensureSchema(database: D1Database = getD1()) {
   } catch {
     // Column already exists.
   }
+}
+
+export async function ensureAccountTargetsSchema(database: D1Database = getD1()) {
+  await database.prepare(schemaSql.accountTargets).run();
 }
 
 export function getSessionFromRequest(request: Request) {

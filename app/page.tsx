@@ -11,7 +11,7 @@ import ExternalAvatarImage from "./external-avatar-image";
 import { resolveLinearAxisDomain } from "../lib/chart-axis";
 import { FALLBACK_SITE_VERSION_NUMBER, formatSiteVersion } from "../lib/site-version";
 import { CHART_DATA_PAGE_SIZE, filterChartPickerAccounts, getNextChartMarkIndex, getRovingTabIndex, groupChartPickerAccounts, paginateChartRows, updateChartSelection } from "../lib/chart-accessibility";
-import { addHandleTargets, formatHandleTargetsForClipboard, normalizeStoredHandleTargets, parseHandleTargetInput, removeHandleTarget } from "../lib/account-targets";
+import { addHandleTargets, formatHandleTargetsForClipboard, normalizeStoredHandleTargets, parseHandleTargetInput } from "../lib/account-targets";
 import { clearCachedDashboardAccountData, loadLocallySavedAccountTargets, loadPersistedAccountTargets, saveLocallySavedAccountTargets, savePersistedAccountTargets } from "../lib/account-target-persistence";
 import { copyTextToClipboard } from "../lib/copy-to-clipboard";
 

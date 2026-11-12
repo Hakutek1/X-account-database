@@ -1,7 +1,7 @@
-import { ensureSchema, ensureSharedSession, getD1, getSessionFromRequest, getSharedSession, sessionCookie } from "../../db";
+import { ensureAccountTargetsSchema, ensureSchema, ensureSharedSession, getD1, getSessionFromRequest, getSharedSession, sessionCookie } from "../../db";
 import { isAdminRequest, isReadAllowed } from "../../lib/admin-access";
 
-export { ensureSchema, ensureSharedSession, getD1, getSessionFromRequest, getSharedSession, sessionCookie };
+export { ensureAccountTargetsSchema, ensureSchema, ensureSharedSession, getD1, getSessionFromRequest, getSharedSession, sessionCookie };
 
 export async function requireReadAccess(request: Request) {
   if (await isReadAllowed(request)) return null;
