@@ -299,7 +299,7 @@ export async function PUT(request: Request) {
       if (!account) continue;
       const next: DailyHistoryRow = {
         ...current,
-        id: `daily-history:${encodeURIComponent(account.accountId)}:${current.date}`,
+        id: current.account_id === account.accountId ? current.id : `daily-history:${encodeURIComponent(account.accountId)}:${current.date}`,
         account_id: account.accountId,
         handle: account.handle,
         display_name: account.displayName,
