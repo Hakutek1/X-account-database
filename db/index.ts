@@ -62,6 +62,10 @@ export async function ensureSchema(database: D1Database = getD1()) {
   }
 }
 
+export async function ensureAccountTargetsSchema(database: D1Database = getD1()) {
+  await database.prepare(schemaSql.accountTargets).run();
+}
+
 export function getSessionFromRequest(request: Request) {
   const cookie = request.headers.get("cookie") ?? "";
   const current = cookie

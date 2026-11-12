@@ -33,7 +33,6 @@ async function assertTabRelations(page) {
     assert.equal(await page.locator("#" + controls).count(), 1, "each tab should reference one existing panel");
   }
   for (const tablist of await page.locator('[role="tablist"]').all()) {
-    const tabs = tablist.locator('[role="tab"]');
     const selected = tablist.locator('[role="tab"][aria-selected="true"]');
     assert.equal(await selected.count(), 1, "each visible tablist should have one selected tab");
     assert.equal(await selected.getAttribute("tabindex"), "0", "the selected tab should be the tab stop");
@@ -42,6 +41,8 @@ async function assertTabRelations(page) {
 }
 
 try {
+  let desktopBrandFontSize = 0;
+  let desktopHistoricalInputFontSize = 0;
   for (const viewport of [
     { name: "desktop", width: 1440, height: 1000 },
     { name: "mobile", width: 390, height: 844 },
@@ -56,6 +57,7 @@ try {
     });
     await page.route("**/api/history", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(historyResponse) }));
     await page.route("**/api/admin/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, isAdmin: true, readMode: "public" }) }));
+    await page.route("**/api/admin/account-targets", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ handles: [], revision: 0, initialized: true }) }));
     await page.route("**/api/admin/historical-data**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       metric: "followers",
       revision: 1,
@@ -68,6 +70,17 @@ try {
     }) }));
     await page.goto(origin, { waitUntil: "networkidle", timeout: 30000 });
     await assertTabRelations(page);
+    const brandFontSize = Number.parseFloat(await page.locator(".editorial-brand .brand-name").evaluate((element) => getComputedStyle(element).fontSize));
+    const themeButton = page.locator(".editorial-theme-toggle");
+    assert.ok(await themeButton.getAttribute("aria-label"), "theme icon-only control must remain accessible");
+    assert.ok(await themeButton.locator(".theme-toggle-icon").isVisible(), "theme icon should always be visible");
+    if (viewport.name === "desktop") {
+      desktopBrandFontSize = brandFontSize;
+      assert.ok(await themeButton.locator(".theme-toggle-label").isVisible(), "desktop theme control should keep its text label");
+    } else {
+      assert.ok(brandFontSize >= 17, "mobile brand title should remain comfortably readable after enlargement");
+      assert.equal(await themeButton.locator(".theme-toggle-label").evaluate((element) => getComputedStyle(element).display), "none", "mobile theme control should display only its icon");
+    }
     if (viewport.name === "mobile") {
       await page.getByRole("button", { name: "活動終了", exact: true }).click();
       await page.locator(".results-mobile-cards").waitFor({ state: "visible" });
@@ -83,8 +96,13 @@ try {
       assert.equal(await mobileName.inputValue(), "編集テスト", "display-name editing should remain available in cards");
       await mobileName.fill("アカウント A");
       await page.getByRole("tab", { name: "過去データ追加" }).click();
-      await page.locator(".historical-grid-wrap").waitFor();
+      await page.locator(".historical-grid-wrap").waitFor({ state: "visible" });
       assert.ok(await page.locator(".historical-scroll-hint").isVisible(), "mobile historical grid should explain horizontal scrolling");
+      assert.equal(await page.locator(".historical-grid th:nth-child(2)").evaluate((element) => getComputedStyle(element).left), "auto", "the handle column should not be horizontally pinned");
+      assert.equal(await page.locator(".historical-grid th:nth-child(3)").evaluate((element) => getComputedStyle(element).left), "0px", "the display-name column should remain horizontally pinned");
+      const mobileHistoricalInputFontSize = Number.parseFloat(await page.locator(".historical-number-input").first().evaluate((element) => getComputedStyle(element).fontSize));
+      assert.ok(mobileHistoricalInputFontSize < desktopHistoricalInputFontSize, "mobile historical cells should use smaller text than desktop");
+      assert.ok(brandFontSize < desktopBrandFontSize, "responsive title should fit the mobile header while remaining enlarged");
       await assertTabRelations(page);
       await page.screenshot({ path: join(outputDirectory, "historical-mobile.png"), fullPage: true });
     } else {
@@ -111,6 +129,12 @@ try {
       assert.equal(await adminTab.getAttribute("aria-selected"), "true");
       await adminTab.click();
       await page.getByRole("heading", { name: "過去データ追加" }).waitFor();
+      await page.locator(".historical-grid-wrap").waitFor({ state: "visible" });
+      assert.equal(await page.locator(".historical-grid th:nth-child(2)").evaluate((element) => getComputedStyle(element).left), "auto", "the handle column should not be horizontally pinned");
+      assert.equal(await page.locator(".historical-grid th:nth-child(3)").evaluate((element) => getComputedStyle(element).left), "0px", "the display-name column should remain horizontally pinned");
+      desktopHistoricalInputFontSize = Number.parseFloat(await page.locator(".historical-number-input").first().evaluate((element) => getComputedStyle(element).fontSize));
+      assert.ok(desktopHistoricalInputFontSize > 0, "desktop historical input should have a measurable font size");
+      await page.screenshot({ path: join(outputDirectory, "historical-desktop.png"), fullPage: true });
       await assertTabRelations(page);
       const followersTab = page.getByRole("tab", { name: "フォロワー数" });
       await followersTab.focus();

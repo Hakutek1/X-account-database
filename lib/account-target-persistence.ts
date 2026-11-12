@@ -1,6 +1,7 @@
 import { normalizeStoredHandleTargets } from "./account-targets.ts";
 
 export const ACCOUNT_TARGETS_STORAGE_KEY = "x-account-stats-account-targets-v1";
+export const ACCOUNT_TARGETS_LOCAL_BACKUP_KEY = "x-account-stats-account-targets-local-backup-v1";
 const MAX_ACCOUNT_TARGETS = 500;
 
 type BrowserStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -36,6 +37,22 @@ export function loadPersistedAccountTargets(storage: BrowserStorage, dashboardSt
 export function savePersistedAccountTargets(storage: BrowserStorage, handles: string[]) {
   const normalized = normalizeTargetList(handles);
   storage.setItem(ACCOUNT_TARGETS_STORAGE_KEY, JSON.stringify(normalized));
+}
+
+export function loadLocallySavedAccountTargets(storage: BrowserStorage): string[] {
+  try {
+    const value = storage.getItem(ACCOUNT_TARGETS_LOCAL_BACKUP_KEY);
+    if (!value) return [];
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? normalizeTargetList(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocallySavedAccountTargets(storage: BrowserStorage, handles: string[]) {
+  const normalized = normalizeTargetList(handles);
+  storage.setItem(ACCOUNT_TARGETS_LOCAL_BACKUP_KEY, JSON.stringify(normalized));
 }
 
 export function clearCachedDashboardAccountData(storage: BrowserStorage, dashboardStorageKey: string) {

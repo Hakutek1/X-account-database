@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ACCOUNT_STATUS_LABELS, ACCOUNT_STATUSES, isAccountStatus, type AccountStatus } from "../lib/account-status";
 import { getRovingTabIndex } from "../lib/chart-accessibility";
+import ExternalAvatarImage from "./external-avatar-image";
 
 type MetricKey = "followers" | "following" | "posts";
 type AccountField = "accountId" | "handle" | "displayName" | "status";
@@ -94,8 +95,6 @@ async function prepareAvatarFile(file: File) {
   throw new Error("画像を512KB以下に圧縮できませんでした。別の画像をお試しください。");
 }
 
-const CUTOFF = "2026-07-22";
-
 function displayDate(value: string) {
   const [year, month, day] = value.split("-");
   return `${year.slice(2)}/${month}/${day}`;
@@ -122,7 +121,7 @@ const HistoricalDataRow = memo(function HistoricalDataRow({ account, dates, metr
     <td><input value={account.handle} onChange={(event) => onUpdateAccount(account.key, "handle", event.target.value)} aria-label={`${account.accountId}のハンドル名`} /></td>
     <td><input value={account.displayName} onChange={(event) => onUpdateAccount(account.key, "displayName", event.target.value)} aria-label={`${account.accountId}の表示名`} /></td>
     <td className="historical-status-cell"><select value={account.status} onChange={(event) => onUpdateAccount(account.key, "status", event.target.value)} aria-label={`${account.accountId}の活動状態`}>{ACCOUNT_STATUSES.map((status) => <option key={status} value={status}>{ACCOUNT_STATUS_LABELS[status]}</option>)}</select></td>
-    <td className="historical-avatar-cell"><div className="historical-avatar-editor">{account.avatarUrl ? <img src={account.avatarUrl} alt="" className="historical-avatar-preview" /> : <span className="historical-avatar-empty">未設定</span>}<label className="historical-avatar-upload"><input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAvatar(account, file); event.currentTarget.value = ""; }} disabled={isUploadingAvatar} /><span>{isUploadingAvatar ? "保存中…" : "画像を選択"}</span></label>{account.avatarUrl && <button type="button" className="historical-avatar-remove" onClick={() => onRemoveAvatar(account)} disabled={isUploadingAvatar}>削除</button>}</div></td>
+    <td className="historical-avatar-cell"><div className="historical-avatar-editor">{account.avatarUrl ? <ExternalAvatarImage src={account.avatarUrl} className="historical-avatar-preview" /> : <span className="historical-avatar-empty">未設定</span>}<label className="historical-avatar-upload"><input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAvatar(account, file); event.currentTarget.value = ""; }} disabled={isUploadingAvatar} /><span>{isUploadingAvatar ? "保存中…" : "画像を選択"}</span></label>{account.avatarUrl && <button type="button" className="historical-avatar-remove" onClick={() => onRemoveAvatar(account)} disabled={isUploadingAvatar}>削除</button>}</div></td>
     {dates.map((date) => <td key={date}><input className="historical-number-input" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} defaultValue={rowValues?.[date] ?? ""} onChange={(event) => onUpdateCell(account.key, date, event.target.value)} aria-label={`${account.accountId} ${displayDate(date)} ${metricLabels[metric]}`} /></td>)}
     <td><button type="button" className="historical-row-delete" onClick={() => onRemove(account)}>行を削除</button></td>
   </tr>;
@@ -313,12 +312,26 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     setMessage(null);
     try {
       const response = await fetch("/api/admin/historical-data", { method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "same-origin", cache: "no-store", body: JSON.stringify(payload) });
-      const result = await response.json().catch(() => ({})) as { error?: string; revision?: number; accounts?: number; dates?: number; cells?: number };
+      const result = await response.json().catch(() => ({})) as { error?: string; revision?: number; accounts?: number; dates?: number; cells?: number; changedRows?: number };
       if (!response.ok) throw new Error(result.error ?? "過去データを保存できませんでした。");
-      setRevision(Number(result.revision ?? revision + 1));
-      setMessage(`保存しました（${result.accounts ?? accounts.length}アカウント・${result.dates ?? dates.length}日・${result.cells ?? 0}セル）。`);
-      await onSaved();
-      await load(metric);
+      const nextRevision = Number(result.revision ?? revision + 1);
+      const nextAccounts = accounts.map((account) => {
+        const accountId = account.accountId.trim();
+        return { ...account, key: accountId, originalAccountId: accountId, accountId };
+      });
+      const nextValues = Object.fromEntries(accounts.map((account) => {
+        const accountId = account.accountId.trim();
+        return [accountId, { ...(draftValuesRef.current[account.key] ?? {}) }];
+      }));
+      draftValuesRef.current = nextValues;
+      setAccounts(nextAccounts);
+      setValues(nextValues);
+      setRevision(nextRevision);
+      setTableVersion((current) => current + 1);
+      setMessage(result.changedRows === 0
+        ? "変更点はありません。最新の内容を維持しています。"
+        : `保存しました（${result.accounts ?? accounts.length}アカウント・${result.dates ?? dates.length}日・更新行 ${result.changedRows ?? "—"}件）。`);
+      void onSaved();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "過去データを保存できませんでした。");
     } finally {

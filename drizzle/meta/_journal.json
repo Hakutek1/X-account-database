@@ -106,6 +106,13 @@
       "when": 1793941648770,
       "tag": "0014_add_avatar_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1794468000000,
+      "tag": "0015_add_account_targets",
+      "breakpoints": true
     }
   ]
 }

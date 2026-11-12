@@ -7,6 +7,9 @@ const METRICS = new Set<DailyHistoryMetric>(["followers", "following", "posts"])
 const MAX_ACCOUNTS = 500;
 const MAX_DATES = 2000;
 const MAX_CELLS = 100000;
+const MAX_BATCH_STATEMENTS = 1900;
+const JSON_BATCH_BYTES = 96 * 1024;
+const MAX_BATCH_PAYLOAD_BYTES = 8 * 1024 * 1024;
 
 type AccountInput = {
   accountId?: unknown;
@@ -84,6 +87,49 @@ function identityMap(rows: SnapshotIdentity[], dailyRows: DailyHistoryRow[]) {
   for (const row of rows) accounts.set(row.account_id, row);
   for (const row of dailyRows) accounts.set(row.account_id, { account_id: row.account_id, handle: row.handle, display_name: row.display_name });
   return accounts;
+}
+
+
+function splitJsonBatches<T>(items: T[], maxBytes = JSON_BATCH_BYTES) {
+  const batches: T[][] = [];
+  let batch: T[] = [];
+  let bytes = 2;
+  for (const item of items) {
+    const itemBytes = new TextEncoder().encode(JSON.stringify(item)).byteLength;
+    if (itemBytes + 2 > maxBytes) throw new RangeError("1件の履歴データがD1の安全な書込サイズを超えています。");
+    if (batch.length && bytes + itemBytes + 1 > maxBytes) {
+      batches.push(batch);
+      batch = [];
+      bytes = 2;
+    }
+    batch.push(item);
+    bytes += itemBytes + (batch.length > 1 ? 1 : 0);
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
+function jsonArrayBytes(items: unknown[]) {
+  let bytes = 2;
+  const encoder = new TextEncoder();
+  for (let index = 0; index < items.length; index += 1) {
+    bytes += encoder.encode(JSON.stringify(items[index])).byteLength + (index ? 1 : 0);
+  }
+  return bytes;
+}
+
+function equalDailyRow(left: DailyHistoryRow | undefined, right: DailyHistoryRow) {
+  return Boolean(left
+    && left.id === right.id
+    && left.account_id === right.account_id
+    && left.date === right.date
+    && left.handle === right.handle
+    && left.display_name === right.display_name
+    && left.followers === right.followers
+    && left.following === right.following
+    && left.posts === right.posts
+    && left.fetched_at === right.fetched_at
+    && left.origin === right.origin);
 }
 
 async function prepareEditorContext() {
@@ -208,15 +254,20 @@ export async function PUT(request: Request) {
       }
     }
     if (cellCount > MAX_CELLS) return json({ error: "編集可能なセル数の上限を超えています。" }, { status: 413 });
-    const { db, session } = await prepareEditorContext();
-    const [dailyRows, snapshots, exclusions] = await Promise.all([
+    await ensureSchema();
+    const db = getD1();
+    const session = getSharedSession();
+    const sharedSession = await db.prepare("SELECT id FROM xstats_sessions WHERE id = ?").bind(session.id).first<{ id: string }>();
+    if (!sharedSession) await ensureSharedSession(db);
+    const [dailyRows, snapshots, exclusions, meta] = await Promise.all([
       loadDailyHistory(db, session.id),
       db.prepare("SELECT account_id, handle, display_name FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id").bind(session.id).all<SnapshotIdentity>(),
       db.prepare("SELECT account_id FROM xstats_historical_account_exclusions WHERE session_id = ?").bind(session.id).all<{ account_id: string }>(),
+      loadDailyHistoryMeta(db, session.id),
     ]);
+    if (meta.revision !== expectedRevision) return json({ error: "履歴が先に更新されました（別の管理者による保存、またはExcel日次履歴の同期）。再読み込みしてから保存してください。", conflict: true }, { status: 409 });
     const excludedIds = new Set(exclusions.results.map((row) => row.account_id));
     const knownIds = identityMap(snapshots.results, dailyRows);
-    await ensureAccountStatuses(db, session.id, [...knownIds.keys()]);
     const statusByAccount = await loadAccountStatusMap(db, session.id);
     const joinedAtByAccount = await loadAccountJoinedMap(db, session.id);
     const knownAccountIds = new Set([...snapshots.results.map((row) => row.account_id), ...dailyRows.map((row) => row.account_id)]);
@@ -248,12 +299,12 @@ export async function PUT(request: Request) {
       if (!account) continue;
       const next: DailyHistoryRow = {
         ...current,
-        id: `daily-history:${encodeURIComponent(account.accountId)}:${current.date}`,
+        id: current.account_id === account.accountId ? current.id : `daily-history:${encodeURIComponent(account.accountId)}:${current.date}`,
         account_id: account.accountId,
         handle: account.handle,
         display_name: account.displayName,
-        origin: "manual",
-        updated_at: new Date().toISOString(),
+        origin: current.origin,
+        updated_at: current.updated_at,
       };
       if (dates.includes(current.date)) next[body.metric] = values[account.accountId][current.date];
       else next[body.metric] = null;
@@ -282,76 +333,152 @@ export async function PUT(request: Request) {
         desired.get(rowKey)![body.metric] = value;
         desired.get(rowKey)!.handle = account.handle;
         desired.get(rowKey)!.display_name = account.displayName;
-        desired.get(rowKey)!.origin = "manual";
       }
     }
 
     const now = new Date().toISOString();
-    if (!(await (async () => {
-      const result = await db.prepare("UPDATE xstats_daily_history_meta SET revision = revision + 1, updated_at = ? WHERE session_id = ? AND revision = ?").bind(now, session.id, expectedRevision).run();
-      return Number(result.meta?.changes ?? 0) === 1;
-    })())) return json({ error: "履歴が先に更新されました（別の管理者による保存、またはExcel日次履歴の同期）。再読み込みしてから保存してください。", conflict: true }, { status: 409 });
-
-    const statements: D1PreparedStatement[] = [];
-    for (const accountId of removedAccountIds) {
-      statements.push(db.prepare("DELETE FROM xstats_snapshots WHERE session_id = ? AND account_id = ?").bind(session.id, accountId));
-      statements.push(db.prepare("DELETE FROM xstats_daily_history WHERE session_id = ? AND account_id = ?").bind(session.id, accountId));
-      statements.push(db.prepare("DELETE FROM xstats_import_mappings WHERE session_id = ? AND account_id = ?").bind(session.id, accountId));
-      statements.push(db.prepare("DELETE FROM xstats_import_issues WHERE session_id = ? AND account_id = ?").bind(session.id, accountId));
-      statements.push(db.prepare("DELETE FROM xstats_account_assets WHERE session_id = ? AND account_id = ?").bind(session.id, accountId));
-      statements.push(db.prepare("DELETE FROM xstats_account_statuses WHERE session_id = ? AND account_id = ?").bind(session.id, accountId));
-      statements.push(db.prepare("INSERT INTO xstats_historical_account_exclusions (session_id, account_id, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id, account_id) DO UPDATE SET updated_at = excluded.updated_at").bind(session.id, accountId, now));
-    }
-    for (const account of cleanAccounts) {
-      statements.push(db.prepare("DELETE FROM xstats_historical_account_exclusions WHERE session_id = ? AND account_id IN (?, ?)").bind(session.id, account.originalAccountId, account.accountId));
-    }
-    const desiredKeys = new Set(desired.keys());
+    const uniqueFraction = Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => String(byte % 10)).join("");
+    const writeMarker = `${now.slice(0, -1)}${uniqueFraction}Z`;
+    const currentByDesiredKey = new Map<string, DailyHistoryRow>();
     for (const current of dailyRows) {
       const mappedAccount = accountByOriginal.get(current.account_id) ?? accountByCurrent.get(current.account_id);
-      const currentKey = mappedAccount ? key(mappedAccount.accountId, current.date) : key(current.account_id, current.date);
-      if (!desiredKeys.has(currentKey) || current.id !== desired.get(currentKey)?.id) statements.push(db.prepare("DELETE FROM xstats_daily_history WHERE session_id = ? AND id = ?").bind(session.id, current.id));
+      currentByDesiredKey.set(mappedAccount ? key(mappedAccount.accountId, current.date) : key(current.account_id, current.date), current);
     }
-    for (const row of desired.values()) {
-      statements.push(db.prepare(`INSERT INTO xstats_daily_history
-        (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)
-        ON CONFLICT(session_id, account_id, date) DO UPDATE SET
-          id = excluded.id,
-          handle = excluded.handle,
-          display_name = excluded.display_name,
-          followers = excluded.followers,
-          following = excluded.following,
-          posts = excluded.posts,
-          fetched_at = excluded.fetched_at,
-          origin = 'manual',
-          updated_at = excluded.updated_at`).bind(row.id, session.id, row.date, row.account_id, row.handle, row.display_name, row.followers, row.following, row.posts, row.fetched_at, now));
+    const changedRows = [...desired.values()]
+      .filter((row) => !equalDailyRow(currentByDesiredKey.get(key(row.account_id, row.date)), row))
+      .map((row) => ({ ...row, origin: "manual" as const, updated_at: now }));
+    const desiredKeys = new Set(desired.keys());
+    const obsoleteIds = dailyRows.filter((current) => {
+      const mappedAccount = accountByOriginal.get(current.account_id) ?? accountByCurrent.get(current.account_id);
+      const desiredKey = mappedAccount ? key(mappedAccount.accountId, current.date) : key(current.account_id, current.date);
+      return !desiredKeys.has(desiredKey) || current.id !== desired.get(desiredKey)?.id;
+    }).map((row) => row.id);
+
+    const identityChanges = cleanAccounts.filter((account) => {
+      const known = knownIds.get(account.originalAccountId) ?? knownIds.get(account.accountId);
+      return account.originalAccountId !== account.accountId || !known || known.handle !== account.handle || known.display_name !== account.displayName;
+    }).map((account) => ({
+      originalAccountId: account.originalAccountId,
+      accountId: account.accountId,
+      handle: account.handle,
+      displayName: account.displayName,
+      originalEncoded: encodeURIComponent(account.originalAccountId),
+      encoded: encodeURIComponent(account.accountId),
+    }));
+    const renamedAccounts = identityChanges.filter((account) => account.originalAccountId !== account.accountId);
+    const statusWrites = cleanAccounts.filter((account) => {
+      const previousStatus = statusByAccount.get(account.originalAccountId) ?? statusByAccount.get(account.accountId);
+      return account.originalAccountId !== account.accountId || previousStatus === undefined || previousStatus !== account.status;
+    }).map((account) => ({
+      accountId: account.accountId,
+      status: account.status,
+      joinedAt: joinedAtByAccount.get(account.originalAccountId) ?? joinedAtByAccount.get(account.accountId) ?? null,
+    }));
+    const activeAccountIds = cleanAccounts.flatMap((account) => [account.originalAccountId, account.accountId]);
+    const exclusionsToRemove = [...new Set(activeAccountIds)].filter((accountId) => excludedIds.has(accountId));
+    const changed = changedRows.length > 0 || obsoleteIds.length > 0 || removedAccountIds.size > 0
+      || identityChanges.length > 0 || statusWrites.length > 0 || exclusionsToRemove.length > 0
+      || [...removedAccountIds].some((accountId) => !excludedIds.has(accountId));
+    if (!changed) {
+      const latestMeta = await loadDailyHistoryMeta(db, session.id);
+      if (latestMeta.revision !== expectedRevision) return json({ error: "履歴が先に更新されました。再読み込みしてから保存してください。", conflict: true }, { status: 409 });
+      return json({ saved: true, revision: expectedRevision, accounts: cleanAccounts.length, dates: dates.length, cells: populatedCellCount, changedRows: 0, deletedRows: 0, batchStatements: 0 });
     }
 
-    for (const account of cleanAccounts) {
-      if (account.originalAccountId !== account.accountId) {
-        statements.push(db.prepare("UPDATE xstats_snapshots SET account_id = ? WHERE session_id = ? AND account_id = ?").bind(account.accountId, session.id, account.originalAccountId));
-        statements.push(db.prepare("UPDATE xstats_import_mappings SET account_id = ? WHERE session_id = ? AND account_id = ?").bind(account.accountId, session.id, account.originalAccountId));
-        statements.push(db.prepare("UPDATE xstats_import_issues SET account_id = ? WHERE session_id = ? AND account_id = ?").bind(account.accountId, session.id, account.originalAccountId));
-        statements.push(db.prepare("UPDATE xstats_account_assets SET account_id = ?, avatar_url = replace(avatar_url, 'accountId=' || ?, 'accountId=' || ?) WHERE session_id = ? AND account_id = ?").bind(account.accountId, encodeURIComponent(account.originalAccountId), encodeURIComponent(account.accountId), session.id, account.originalAccountId));
-        statements.push(db.prepare("DELETE FROM xstats_account_statuses WHERE session_id = ? AND account_id = ?").bind(session.id, account.originalAccountId));
+    const guard = "EXISTS (SELECT 1 FROM xstats_daily_history_meta WHERE session_id = ? AND revision = ? AND updated_at = ?)";
+    const statements: D1PreparedStatement[] = [
+      db.prepare("UPDATE xstats_daily_history_meta SET revision = revision + 1, updated_at = ? WHERE session_id = ? AND revision = ?").bind(writeMarker, session.id, expectedRevision),
+    ];
+    const removedIds = [...removedAccountIds];
+    if (removedIds.length) {
+      const idBatches = splitJsonBatches(removedIds);
+      for (const table of ["xstats_snapshots", "xstats_import_mappings", "xstats_import_issues", "xstats_account_assets", "xstats_account_statuses"]) {
+        for (const batch of idBatches) {
+          statements.push(db.prepare(`DELETE FROM ${table} WHERE session_id = ? AND account_id IN (SELECT value FROM json_each(?)) AND ${guard}`).bind(session.id, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
+        }
       }
-      const joinedAt = joinedAtByAccount.get(account.originalAccountId) ?? joinedAtByAccount.get(account.accountId) ?? null;
-      statements.push(db.prepare(`INSERT INTO xstats_account_statuses (session_id, account_id, status, joined_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(session_id, account_id) DO UPDATE SET status = excluded.status, joined_at = COALESCE(xstats_account_statuses.joined_at, excluded.joined_at), updated_at = excluded.updated_at`).bind(session.id, account.accountId, account.status, joinedAt, now));
-      statements.push(db.prepare("UPDATE xstats_snapshots SET handle = ?, display_name = ? WHERE session_id = ? AND account_id = ?").bind(account.handle, account.displayName, session.id, account.accountId));
-      statements.push(db.prepare("UPDATE xstats_import_mappings SET handle = ?, display_name = ? WHERE session_id = ? AND account_id = ?").bind(account.handle, account.displayName, session.id, account.accountId));
-      statements.push(db.prepare("UPDATE xstats_import_issues SET handle = ?, display_name = ? WHERE session_id = ? AND account_id = ?").bind(account.handle, account.displayName, session.id, account.accountId));
+      for (const batch of idBatches) {
+        statements.push(db.prepare(`INSERT INTO xstats_historical_account_exclusions (session_id, account_id, updated_at)
+          SELECT ?, value, ? FROM json_each(?) WHERE ${guard}
+          ON CONFLICT(session_id, account_id) DO UPDATE SET updated_at = excluded.updated_at`).bind(session.id, now, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
+      }
     }
-    for (const statementChunk of chunk(statements, 80)) if (statementChunk.length) await db.batch(statementChunk);
-    return json({ saved: true, revision: expectedRevision + 1, accounts: cleanAccounts.length, dates: dates.length, cells: populatedCellCount });
+    const renamedIds = renamedAccounts.map((account) => account.originalAccountId);
+    if (renamedIds.length) {
+      for (const batch of splitJsonBatches(renamedIds)) {
+        statements.push(db.prepare(`DELETE FROM xstats_account_statuses WHERE session_id = ? AND account_id IN (SELECT value FROM json_each(?)) AND ${guard}`).bind(session.id, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
+      }
+    }
+    for (const batch of splitJsonBatches(exclusionsToRemove)) {
+      statements.push(db.prepare(`DELETE FROM xstats_historical_account_exclusions WHERE session_id = ? AND account_id IN (SELECT value FROM json_each(?)) AND ${guard}`).bind(session.id, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
+    }
+    for (const batch of splitJsonBatches(obsoleteIds)) {
+      statements.push(db.prepare(`DELETE FROM xstats_daily_history WHERE session_id = ? AND id IN (SELECT value FROM json_each(?)) AND ${guard}`).bind(session.id, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
+    }
+    for (const batch of splitJsonBatches(changedRows)) {
+      statements.push(db.prepare(`INSERT INTO xstats_daily_history
+        (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at)
+        SELECT json_extract(value, '$.id'), ?, json_extract(value, '$.date'), json_extract(value, '$.account_id'),
+          json_extract(value, '$.handle'), json_extract(value, '$.display_name'), json_extract(value, '$.followers'),
+          json_extract(value, '$.following'), json_extract(value, '$.posts'), json_extract(value, '$.fetched_at'),
+          json_extract(value, '$.origin'), json_extract(value, '$.updated_at')
+        FROM json_each(?) WHERE ${guard}
+        ON CONFLICT(session_id, account_id, date) DO UPDATE SET
+          id = excluded.id, handle = excluded.handle, display_name = excluded.display_name,
+          followers = excluded.followers, following = excluded.following, posts = excluded.posts,
+          fetched_at = excluded.fetched_at, origin = excluded.origin, updated_at = excluded.updated_at`).bind(session.id, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
+    }
+    for (const batch of splitJsonBatches(identityChanges)) {
+      for (const table of ["xstats_snapshots", "xstats_import_mappings", "xstats_import_issues"]) {
+        statements.push(db.prepare(`UPDATE ${table} AS target
+          SET account_id = json_extract(mapping.value, '$.accountId'),
+              handle = json_extract(mapping.value, '$.handle'),
+              display_name = json_extract(mapping.value, '$.displayName')
+          FROM json_each(?) AS mapping
+          WHERE target.session_id = ? AND target.account_id = json_extract(mapping.value, '$.originalAccountId')
+            AND ${guard}`).bind(JSON.stringify(batch), session.id, session.id, expectedRevision + 1, writeMarker));
+      }
+    }
+    for (const batch of splitJsonBatches(renamedAccounts)) {
+      statements.push(db.prepare(`UPDATE xstats_account_assets AS target
+        SET account_id = json_extract(mapping.value, '$.accountId'),
+            avatar_url = replace(target.avatar_url, 'accountId=' || json_extract(mapping.value, '$.originalEncoded'), 'accountId=' || json_extract(mapping.value, '$.encoded'))
+        FROM json_each(?) AS mapping
+        WHERE target.session_id = ? AND target.account_id = json_extract(mapping.value, '$.originalAccountId')
+          AND ${guard}`).bind(JSON.stringify(batch), session.id, session.id, expectedRevision + 1, writeMarker));
+    }
+    for (const batch of splitJsonBatches(statusWrites)) {
+      statements.push(db.prepare(`INSERT INTO xstats_account_statuses (session_id, account_id, status, joined_at, updated_at)
+        SELECT ?, json_extract(value, '$.accountId'), json_extract(value, '$.status'), json_extract(value, '$.joinedAt'), ?
+        FROM json_each(?) WHERE ${guard}
+        ON CONFLICT(session_id, account_id) DO UPDATE SET
+          status = excluded.status,
+          joined_at = COALESCE(xstats_account_statuses.joined_at, excluded.joined_at),
+          updated_at = excluded.updated_at`).bind(session.id, now, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
+    }
+
+    if (statements.length > MAX_BATCH_STATEMENTS) {
+      return json({ error: "変更量が安全な一括保存の上限を超えています。日付またはアカウントを分けて再度お試しください。", limitExceeded: true }, { status: 413 });
+    }
+    const renamedIdsForSize = renamedAccounts.map((account) => account.originalAccountId);
+    const estimatedPayloadBytes = jsonArrayBytes(changedRows)
+      + jsonArrayBytes(obsoleteIds)
+      + jsonArrayBytes(removedIds) * 6
+      + jsonArrayBytes(renamedIdsForSize)
+      + jsonArrayBytes(exclusionsToRemove)
+      + jsonArrayBytes(identityChanges) * 3
+      + jsonArrayBytes(renamedAccounts)
+      + jsonArrayBytes(statusWrites)
+      + statements.length * 1024;
+    if (estimatedPayloadBytes > MAX_BATCH_PAYLOAD_BYTES) {
+      return json({ error: "変更量が安全な一括保存の容量上限を超えています。日付またはアカウントを分けて再度お試しください。", limitExceeded: true }, { status: 413 });
+    }
+    const results = await db.batch(statements);
+    if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+      return json({ error: "履歴が先に更新されました（別の管理者による保存、またはExcel日次履歴の同期）。再読み込みしてから保存してください。", conflict: true }, { status: 409 });
+    }
+    return json({ saved: true, revision: expectedRevision + 1, accounts: cleanAccounts.length, dates: dates.length, cells: populatedCellCount, changedRows: changedRows.length, deletedRows: obsoleteIds.length, batchStatements: statements.length });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "過去データを保存できませんでした。" }, { status: 500 });
   }
-}
-
-function chunk<T>(items: T[], size: number) {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
-  return chunks;
 }

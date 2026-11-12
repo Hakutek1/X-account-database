@@ -300,7 +300,7 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.match(favicon, /stroke="#9ADBD6"/);
   assert.doesNotMatch(html, /Xリスト|リストのメンバー/);
   assert.match(html, /parseHandleTargetInput/);
-  assert.match(html, /removeHandleTarget/);
+  assert.match(html, /removeAccountTarget/);
   assert.doesNotMatch(html, /hero-note/);
   assert.match(html, /requestCollect/);
   assert.match(html, /public-readonly-card/);

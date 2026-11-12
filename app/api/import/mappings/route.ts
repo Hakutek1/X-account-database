@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     const rows = await db.prepare("SELECT source_name, source_key, account_id, handle, display_name, updated_at FROM xstats_import_mappings WHERE session_id = ? ORDER BY source_name ASC").bind(session.id).all();
     const response = json({ mappings: rows.results });
     return response;
-  } catch (error) {
+  } catch {
     const response = json({ error: "保存済みの照合情報を読み込めませんでした", mappings: [] }, { status: 500 });
     return response;
   }
