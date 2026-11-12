@@ -56,16 +56,16 @@ async function makeBrowserPage(handles) {
 
 try {
   const first = await makeBrowserPage(["alpha", "beta"]);
-  await first.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("2 / 500"), null, { timeout: 30000 });
-  await first.getByRole("button", { name: "取得対象を編集" }).click();
+  await first.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("2件登録"), null, { timeout: 30000 });
+  await first.getByRole("button", { name: "登録アカウントを編集" }).click();
   await assert.doesNotReject(() => first.getByRole("list", { name: "取得対象アカウント" }).getByText("@alpha", { exact: true }).waitFor());
   let shared = await getTargets();
   assert.deepEqual(shared.handles, ["alpha", "beta"]);
   assert.equal(shared.initialized, true, "first login should initialize shared storage");
 
   const second = await makeBrowserPage(["alpha", "legacy"]);
-  await second.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("2 / 500"), null, { timeout: 30000 });
-  await second.getByRole("button", { name: "取得対象を編集" }).click();
+  await second.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("2件登録"), null, { timeout: 30000 });
+  await second.getByRole("button", { name: "登録アカウントを編集" }).click();
   await second.getByRole("status").filter({ hasText: "この端末だけに保存" }).waitFor({ timeout: 30000 });
   assert.deepEqual((await getTargets()).handles, ["alpha", "beta"], "legacy local-only target must not merge automatically");
   await second.getByRole("button", { name: "この端末の未共有アカウントを共有一覧に追加" }).click();
@@ -80,8 +80,8 @@ try {
   assert.ok(shared.handles.includes("newuser"), "new target should persist in D1");
 
   await first.reload({ waitUntil: "domcontentloaded" });
-  await first.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("4 / 500"), null, { timeout: 30000 });
-  await first.getByRole("button", { name: "取得対象を編集" }).click();
+  await first.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("4件登録"), null, { timeout: 30000 });
+  await first.getByRole("button", { name: "登録アカウントを編集" }).click();
   await first.getByRole("button", { name: "@newuserを取得対象から外す" }).click();
   await first.getByText("過去データは保持されています。").waitFor({ timeout: 30000 });
   shared = await getTargets();
@@ -89,7 +89,7 @@ try {
   assert.equal(shared.handles.length, 3);
 
   await second.reload({ waitUntil: "domcontentloaded" });
-  await second.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("3 / 500"), null, { timeout: 30000 });
+  await second.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("3件登録"), null, { timeout: 30000 });
 
   const raceBase = await getTargets();
   const raceResults = await Promise.all([

@@ -57,7 +57,7 @@ try {
     });
     await page.route("**/api/history", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(historyResponse) }));
     await page.route("**/api/admin/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, isAdmin: true, readMode: "public" }) }));
-    await page.route("**/api/admin/account-targets", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ handles: [], revision: 0, initialized: true }) }));
+    await page.route("**/api/admin/account-targets", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ handles: ["account_a", "account_b"], revision: 0, initialized: true }) }));
     await page.route("**/api/admin/historical-data**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       metric: "followers",
       revision: 1,
@@ -81,7 +81,34 @@ try {
       assert.ok(brandFontSize >= 17, "mobile brand title should remain comfortably readable after enlargement");
       assert.equal(await themeButton.locator(".theme-toggle-label").evaluate((element) => getComputedStyle(element).display), "none", "mobile theme control should display only its icon");
     }
+    const resultStatus = page.locator(".results-date-status");
+    await resultStatus.waitFor();
+    const resultStatusText = await resultStatus.innerText();
+    assert.match(resultStatusText, /表示日: \d{4}-\d{2}-\d{2}/, "the displayed data date should be labeled near the collection status");
+    assert.match(resultStatusText, /取得元: fxTwitter/);
+    assert.match(resultStatusText, /最終取得: 2026\/10\/28 12:00 · 成功 2件 \/ 失敗 1件/);
+    assert.doesNotMatch(resultStatusText, /JST/);
+    assert.equal(await page.locator(".topbar .collection-status-meta").count(), 0, "collection status should no longer be in the global header");
+    assert.equal(await page.getByText("調べたいアカウントを追加", { exact: true }).count(), 0);
+    assert.equal(await page.locator(".hero-section .input-card .section-heading").count(), 0, "top account prompt and limit badge should be removed");
+    assert.equal(await page.locator(".input-footer .input-count").innerText(), "2件登録");
+    const editButton = page.getByRole("button", { name: "登録アカウントを編集", exact: true });
+    const collectButton = page.getByRole("button", { name: /データを取得する/ });
+    const editBox = await editButton.boundingBox();
+    const collectBox = await collectButton.boundingBox();
+    assert.ok(editBox && collectBox);
+    assert.ok(Math.abs(editBox.width - collectBox.width) < 1 && Math.abs(editBox.height - collectBox.height) < 1, "account edit and collection buttons should have equal dimensions");
+    await editButton.click();
+    await page.getByRole("heading", { name: "登録アカウントを編集" }).waitFor();
+    assert.match(await page.locator(".account-editor-content").innerText(), /500 件登録済み/);
+    await page.keyboard.press("Escape");
+    await page.locator(".account-editor-dialog[open]").waitFor({ state: "hidden" });
+    assert.equal(await page.locator(".chart-data-table").count(), 0, "the chart data table should be removed from the rendered page");
+    if (viewport.name === "desktop") {
+      await page.screenshot({ path: join(outputDirectory, "results-desktop.png"), fullPage: true });
+    }
     if (viewport.name === "mobile") {
+      assert.equal(await page.locator(".table-scroll-hint").isVisible(), false, "mobile cards should not show a table scroll hint");
       await page.getByRole("button", { name: "活動終了", exact: true }).click();
       await page.locator(".results-mobile-cards").waitFor({ state: "visible" });
       assert.equal(await page.locator(".results-mobile-cards [role='listitem']").count(), 2, "mobile results should render one card per account");
@@ -152,8 +179,6 @@ try {
     }
     await page.getByRole("tab", { name: "グラフ表示" }).click();
     await page.getByRole("heading", { name: "グラフ表示" }).waitFor();
-    await page.getByText("取得元: fxTwitter", { exact: true }).waitFor();
-    await page.getByText(/最終取得: 2026\/10\/28 12:00 JST · 成功 2件 \/ 失敗 1件/).waitFor();
     await page.locator("svg.data-chart").waitFor();
     assert.ok(await page.locator("svg.data-chart rect.chart-bar").count() > 0, "the fixture graph should render bars");
     await assertTabRelations(page);
@@ -185,9 +210,7 @@ try {
     await search.fill("");
     await page.locator(".selection-actions").getByRole("button", { name: "絞り込み中のアカウントを全てON" }).click();
     assert.equal(await page.locator("svg.data-chart rect.chart-bar").count(), 2, "filtered bulk selection should enable both accounts");
-    const dataDisclosure = page.locator("details.chart-data-table");
-    await dataDisclosure.locator("summary").click();
-    assert.equal(await dataDisclosure.locator("tbody tr").count(), 2, "the compare data table should match the chart rows");
+    assert.equal(await page.locator(".chart-data-table").count(), 0, "graph data-table markup should not be present");
     const firstBar = page.locator("svg.data-chart rect.chart-bar").first();
     await firstBar.focus();
     assert.equal(await firstBar.getAttribute("tabindex"), "0", "one graph mark should be a tab stop");
@@ -203,10 +226,27 @@ try {
     assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-chart-mark-index")), "1", "trend points should follow the same arrow navigation");
     await page.getByRole("tab", { name: "比較" }).click();
     if (viewport.name === "mobile") assert.ok(await page.locator(".chart-scroll-hint").isVisible(), "mobile graph should explain horizontal scrolling");
-    await page.locator("details.chart-data-table summary").click();
+    const chartSettings = page.locator(".chart-settings-grid");
+    const settingColumns = await chartSettings.evaluate((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length);
+    assert.equal(settingColumns, viewport.name === "desktop" ? 2 : 1, "graph customization sections should use two columns on desktop and one on mobile");
+    const axisToggle = page.getByRole("button", { name: "数値軸の設定を開く" });
+    assert.ok(await axisToggle.isVisible(), "graph settings should be collapsible on every screen size");
+    assert.equal(await axisToggle.getAttribute("aria-expanded"), "false", "graph settings should start collapsed");
+    await axisToggle.click();
+    const openedAxisToggle = page.getByRole("button", { name: "数値軸の設定を閉じる" });
+    assert.equal(await openedAxisToggle.getAttribute("aria-expanded"), "true", "graph settings should open on demand");
+    const axisFields = page.locator(".chart-setting-disclosure .axis-settings").first();
+    const fieldColumns = await axisFields.evaluate((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length);
+    assert.equal(fieldColumns, viewport.name === "desktop" ? 2 : 1, "graph settings fields should adapt to screen width");
+    await openedAxisToggle.click();
     const accountDisclosureClose = page.getByRole("button", { name: "表示アカウントを閉じる" });
     if (await accountDisclosureClose.isVisible()) await accountDisclosureClose.click();
-    await page.screenshot({ path: join(outputDirectory, "graph-" + viewport.name + ".png"), fullPage: true });
+
+    const html = page.locator("html");
+    if (await html.getAttribute("data-theme") !== "dark") await themeButton.click();
+    await page.screenshot({ path: join(outputDirectory, "graph-" + viewport.name + "-dark.png"), fullPage: true });
+    await themeButton.click();
+    await page.screenshot({ path: join(outputDirectory, "graph-" + viewport.name + "-light.png"), fullPage: true });
     assert.equal(await page.getByText("fxTwitter接続", { exact: true }).count(), 0);
     await page.close();
   }

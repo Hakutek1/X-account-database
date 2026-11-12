@@ -5,7 +5,6 @@ import {
   getNextChartMarkIndex,
   getRovingTabIndex,
   groupChartPickerAccounts,
-  paginateChartRows,
   updateChartSelection,
 } from "../lib/chart-accessibility.ts";
 
@@ -35,14 +34,6 @@ test("bulk selection changes filtered accounts while preserving hidden selection
   const filtered = [accounts[0], accounts[1]];
   assert.deepEqual(updateChartSelection(["outside", "alpha"], filtered, true), ["outside", "alpha", "beta"]);
   assert.deepEqual(updateChartSelection(["outside", "alpha", "beta"], filtered, false), ["outside"]);
-});
-
-test("chart data pagination shows 50 rows and clamps page bounds", () => {
-  const rows = Array.from({ length: 51 }, (_, index) => index);
-  assert.deepEqual(paginateChartRows(rows, 0).rows, rows.slice(0, 50));
-  assert.deepEqual(paginateChartRows(rows, 1).rows, [50]);
-  assert.equal(paginateChartRows(rows, 99).page, 1);
-  assert.equal(paginateChartRows([], 0).totalPages, 1);
 });
 
 test("tabs follow the WAI roving-focus keys", () => {

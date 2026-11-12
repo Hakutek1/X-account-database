@@ -33,7 +33,11 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.match(html, /過去データ追加/);
   assert.match(html, /取得データ/);
   assert.doesNotMatch(html, /ACCOUNT INTELLIGENCE|INPUT SOURCES|PUBLIC DASHBOARD|PRIVATE DASHBOARD|SNAPSHOT DATA|VISUAL ANALYSIS/);
-  assert.match(html, /取得対象を編集/);
+  assert.match(html, /登録アカウントを編集/);
+  assert.doesNotMatch(html, /調べたいアカウントを追加|取得対象を編集|ADMINISTRATOR EDITOR|chart-data-table|JST/);
+  assert.match(html, /results-date-status/);
+  assert.match(html, /chart-settings-grid/);
+  assert.match(html, /table-scroll-hint/);
   assert.match(html, /<dialog/);
   assert.match(html, /account-target-list/);
   assert.doesNotMatch(html, /NFLF重複を確認/);
