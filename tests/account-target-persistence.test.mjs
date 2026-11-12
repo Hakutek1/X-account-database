@@ -3,9 +3,12 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
   ACCOUNT_TARGETS_STORAGE_KEY,
+  ACCOUNT_TARGETS_LOCAL_BACKUP_KEY,
   clearCachedDashboardAccountData,
+  loadLocallySavedAccountTargets,
   loadPersistedAccountTargets,
   savePersistedAccountTargets,
+  saveLocallySavedAccountTargets,
 } from "../lib/account-target-persistence.ts";
 import { copyTextToClipboard } from "../lib/copy-to-clipboard.ts";
 
@@ -75,6 +78,18 @@ test("saving an empty target list is preserved as empty", () => {
   assert.deepEqual(loadPersistedAccountTargets(storage, "dashboard"), []);
 });
 
+
+
+test("device-only account targets remain available for explicit merge while shared targets change", () => {
+  const storage = new MemoryStorage();
+  saveLocallySavedAccountTargets(storage, ["legacy", "shared"]);
+  savePersistedAccountTargets(storage, ["shared", "new-shared"]);
+
+  assert.deepEqual(loadLocallySavedAccountTargets(storage), ["legacy", "shared"]);
+  assert.deepEqual(loadPersistedAccountTargets(storage, "dashboard"), ["shared", "new-shared"]);
+  assert.deepEqual(JSON.parse(storage.getItem(ACCOUNT_TARGETS_LOCAL_BACKUP_KEY)), ["legacy", "shared"]);
+});
+
 test("clipboard helper uses the browser Clipboard API when it succeeds", async () => {
   let copied = "";
   const { document } = createDocument(false);
@@ -111,8 +126,11 @@ test("clipboard helper reports failure when the fallback cannot copy", async () 
 test("dashboard wires target storage to login/logout and uses the clipboard fallback helper", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(page, /loadPersistedAccountTargets\(window\.localStorage, DASHBOARD_STORAGE_KEY\)/);
-  assert.ok(page.includes('setAccountInput(loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY).join("\\n"));'));
+  assert.match(page, /syncAccountTargetsOnLogin/);
+  assert.match(page, /fetch\("\/api\/admin\/account-targets"/);
   assert.ok(page.includes("setIsAdmin(true);"));
+  assert.match(page, /saveLocallySavedAccountTargets/);
+  assert.match(page, /この端末の未共有アカウントを共有一覧に追加/);
   assert.match(page, /savePersistedAccountTargets\(window\.localStorage/);
   assert.match(page, /clearCachedDashboardAccountData\(window\.localStorage, DASHBOARD_STORAGE_KEY\)/);
   assert.match(page, /copyTextToClipboard\(formatHandleTargetsForClipboard\(accountTargetHandles\)\)/);

@@ -7,11 +7,12 @@ import { WORKBOOK_SHEETS } from "../lib/workbook-sheet-names";
 import { canonicalDailyFetchedAt, dailyRecordDate } from "../lib/daily-history";
 import { ACCOUNT_STATUS_LABELS, ACCOUNT_STATUSES, isAccountStatus, type AccountStatus } from "../lib/account-status";
 import HistoricalDataEditor from "./historical-data-editor";
+import ExternalAvatarImage from "./external-avatar-image";
 import { resolveLinearAxisDomain } from "../lib/chart-axis";
 import { FALLBACK_SITE_VERSION_NUMBER, formatSiteVersion } from "../lib/site-version";
 import { CHART_DATA_PAGE_SIZE, filterChartPickerAccounts, getNextChartMarkIndex, getRovingTabIndex, groupChartPickerAccounts, paginateChartRows, updateChartSelection } from "../lib/chart-accessibility";
 import { addHandleTargets, formatHandleTargetsForClipboard, normalizeStoredHandleTargets, parseHandleTargetInput, removeHandleTarget } from "../lib/account-targets";
-import { clearCachedDashboardAccountData, loadPersistedAccountTargets, savePersistedAccountTargets } from "../lib/account-target-persistence";
+import { clearCachedDashboardAccountData, loadLocallySavedAccountTargets, loadPersistedAccountTargets, saveLocallySavedAccountTargets, savePersistedAccountTargets } from "../lib/account-target-persistence";
 import { copyTextToClipboard } from "../lib/copy-to-clipboard";
 
 const MAX_ACCOUNTS = 500;
@@ -70,6 +71,7 @@ type LatestCollection = { fetched_at: string; success_count: number; error_count
 type HistoryResponse = { runs?: { id: string; fetched_at: string }[]; rows?: HistoryRow[]; latestCollection?: LatestCollection | null; error?: string };
 type CollectResponse = { rows?: AccountRow[]; warnings?: string[]; error?: string };
 type AdminStatus = { configured?: boolean; isAdmin?: boolean; readMode?: "private" | "public"; error?: string };
+type AccountTargetsResponse = { handles?: string[]; revision?: number; initialized?: boolean; changed?: boolean; conflict?: boolean; error?: string };
 type SiteVersionResponse = { version?: number; label?: string };
 type ExportRow = {
   fetchedAt: string;
@@ -436,7 +438,7 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
             <tr key={row.id + "-" + row.handle} className={row.status === "error" ? "is-error" : ""}>
               <td>
                 {row.status === "ok" ? <a className="account-link" href={"https://x.com/" + encodeURIComponent(row.handle)} target="_blank" rel="noreferrer">
-                  {row.avatarUrl ? <img className="account-avatar" src={row.avatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
+                  {row.avatarUrl ? <ExternalAvatarImage className="account-avatar" src={row.avatarUrl} /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
                   <span className="handle-cell">@{row.handle}</span>
                 </a> : <span className="account-link account-link-disabled"><span className="account-avatar account-avatar-fallback" aria-hidden="true">?</span><span className="handle-cell">@{row.handle}</span></span>}
                 {row.status === "error" && <span className="status-pill status-error">失敗</span>}
@@ -460,7 +462,7 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
             <div className="results-mobile-identity">
               <div className="results-mobile-account">
                 {row.status === "ok" ? <a className="account-link" href={"https://x.com/" + encodeURIComponent(row.handle)} target="_blank" rel="noreferrer">
-                  {row.avatarUrl ? <img className="account-avatar" src={row.avatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
+                  {row.avatarUrl ? <ExternalAvatarImage className="account-avatar" src={row.avatarUrl} /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
                   <span className="handle-cell">@{row.handle}</span>
                 </a> : <span className="account-link account-link-disabled"><span className="account-avatar account-avatar-fallback" aria-hidden="true">?</span><span className="handle-cell">@{row.handle}</span></span>}
                 <AccountStatusBadge status={row.accountStatus} />
@@ -487,7 +489,7 @@ function CompactResults({ rows, previousByAccount, displayNameOverrides }: { row
     const displayName = resolvedDisplayName(row, displayNameOverrides);
     return <article className={`compact-result-card ${row.status === "error" ? "is-error" : ""}`} key={`${row.id}-${row.handle}`}>
       <div className="compact-account-cell"><a className="account-link" href={row.status === "ok" ? `https://x.com/${encodeURIComponent(row.handle)}` : undefined} target={row.status === "ok" ? "_blank" : undefined} rel={row.status === "ok" ? "noreferrer" : undefined}>
-        {row.avatarUrl ? <img className="account-avatar" src={row.avatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
+        {row.avatarUrl ? <ExternalAvatarImage className="account-avatar" src={row.avatarUrl} /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
         <span className="compact-account-copy"><strong className="handle-cell">{displayName}</strong><small>@{row.handle}</small><AccountStatusBadge status={row.accountStatus} /></span>
       </a></div>
       {row.status === "ok" ? <><div className="compact-value-cell"><small>フォロワー</small><strong>{formatResultNumber(row.followers)}</strong><em className={deltaClass(previousByAccount.get(row.id)?.followers)}>{formatResultDelta(previousByAccount.get(row.id)?.followers)}</em></div><div className="compact-value-cell"><small>フォロー</small><strong>{formatResultNumber(row.following)}</strong></div><div className="compact-value-cell"><small>投稿</small><strong>{formatResultNumber(row.posts)}</strong><em className={deltaClass(previousByAccount.get(row.id)?.posts)}>{formatResultDelta(previousByAccount.get(row.id)?.posts)}</em></div></> : <p className="compact-error-copy">{row.error ?? "取得できませんでした"}</p>}
@@ -581,8 +583,8 @@ function TopResults({ rows, topMetric, onTopMetricChange, previousByAccount, dis
     {topRows.length ? <><div className="top15-grid">{topRows.map((row, index) => {
       const value = topMetricValue(row, topMetric, previousByAccount);
       const displayName = resolvedDisplayName(row, displayNameOverrides);
-      return <article className={`top15-card top15-rank-${index + 1}`} key={row.id}><span className="top15-rank">{String(index + 1).padStart(2, "0")}</span><a href={`https://x.com/${encodeURIComponent(row.handle)}`} target="_blank" rel="noreferrer" className="top15-account" aria-label={`${displayName} @${row.handle}`}>{row.avatarUrl ? <img className="top15-avatar" src={row.avatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="top15-avatar top15-avatar-fallback">{row.handle.slice(0, 1).toUpperCase()}</span>}<span><strong>{displayName}</strong></span></a><strong className={`top15-value ${value !== null && value < 0 ? "is-negative" : ""}`}>{formatTopMetricValue(row, topMetric, previousByAccount)}</strong></article>;
-    })}</div>{expanded && extraRows.length > 0 && <div className="top15-expanded-grid">{extraRows.map((row, extraIndex) => { const rank = extraIndex + 16; const displayName = resolvedDisplayName(row, displayNameOverrides); const value = topMetricValue(row, topMetric, previousByAccount); return <article className="top15-card" key={row.id}><span className="top15-rank">{String(rank).padStart(2, "0")}</span><a href={`https://x.com/${encodeURIComponent(row.handle)}`} target="_blank" rel="noreferrer" className="top15-account" aria-label={`${displayName} @${row.handle}`}>{row.avatarUrl ? <img className="top15-avatar" src={row.avatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="top15-avatar top15-avatar-fallback">{row.handle.slice(0, 1).toUpperCase()}</span>}<span><strong>{displayName}</strong></span></a><strong className={`top15-value ${value !== null && value < 0 ? "is-negative" : ""}`}>{formatTopMetricValue(row, topMetric, previousByAccount)}</strong></article>; })}</div>}{extraRows.length > 0 && <button type="button" className="secondary-button top15-expand-button" onClick={onToggleExpanded}>{expanded ? "16位以下を非表示" : "16位以下を表示"}</button>}</> : <div className="empty-table">{!hasRowsForDate ? (selectedDate ? `${selectedDate}はデータがないため表示できません。` : "ランキングを表示できる取得データがありません。") : isTopDeltaMetric(topMetric) ? `${selectedDate}は比較対象のデータがありません。` : `${selectedDate}は表示できる数値がありません。`}</div>}
+      return <article className={`top15-card top15-rank-${index + 1}`} key={row.id}><span className="top15-rank">{String(index + 1).padStart(2, "0")}</span><a href={`https://x.com/${encodeURIComponent(row.handle)}`} target="_blank" rel="noreferrer" className="top15-account" aria-label={`${displayName} @${row.handle}`}>{row.avatarUrl ? <ExternalAvatarImage className="top15-avatar" src={row.avatarUrl} /> : <span className="top15-avatar top15-avatar-fallback">{row.handle.slice(0, 1).toUpperCase()}</span>}<span><strong>{displayName}</strong></span></a><strong className={`top15-value ${value !== null && value < 0 ? "is-negative" : ""}`}>{formatTopMetricValue(row, topMetric, previousByAccount)}</strong></article>;
+    })}</div>{expanded && extraRows.length > 0 && <div className="top15-expanded-grid">{extraRows.map((row, extraIndex) => { const rank = extraIndex + 16; const displayName = resolvedDisplayName(row, displayNameOverrides); const value = topMetricValue(row, topMetric, previousByAccount); return <article className="top15-card" key={row.id}><span className="top15-rank">{String(rank).padStart(2, "0")}</span><a href={`https://x.com/${encodeURIComponent(row.handle)}`} target="_blank" rel="noreferrer" className="top15-account" aria-label={`${displayName} @${row.handle}`}>{row.avatarUrl ? <ExternalAvatarImage className="top15-avatar" src={row.avatarUrl} /> : <span className="top15-avatar top15-avatar-fallback">{row.handle.slice(0, 1).toUpperCase()}</span>}<span><strong>{displayName}</strong></span></a><strong className={`top15-value ${value !== null && value < 0 ? "is-negative" : ""}`}>{formatTopMetricValue(row, topMetric, previousByAccount)}</strong></article>; })}</div>}{extraRows.length > 0 && <button type="button" className="secondary-button top15-expand-button" onClick={onToggleExpanded}>{expanded ? "16位以下を非表示" : "16位以下を表示"}</button>}</> : <div className="empty-table">{!hasRowsForDate ? (selectedDate ? `${selectedDate}はデータがないため表示できません。` : "ランキングを表示できる取得データがありません。") : isTopDeltaMetric(topMetric) ? `${selectedDate}は比較対象のデータがありません。` : `${selectedDate}は表示できる数値がありません。`}</div>}
     {(Object.keys(topMetricLabels) as TopMetric[]).filter((item) => item !== topMetric).map((item) => <div key={item} id={"ranking-metric-panel-" + item} role="tabpanel" aria-labelledby={"ranking-metric-tab-" + item} hidden />)}
     </div>
   </div>;
@@ -1171,6 +1173,10 @@ export default function Home() {
   const [accountEditorDraft, setAccountEditorDraft] = useState("");
   const [accountEditorFeedback, setAccountEditorFeedback] = useState<string | null>(null);
   const [accountTargetsCopied, setAccountTargetsCopied] = useState(false);
+  const [accountTargetsRevision, setAccountTargetsRevision] = useState<number | null>(null);
+  const [accountTargetsSyncReady, setAccountTargetsSyncReady] = useState(false);
+  const [isAccountTargetsSyncing, setIsAccountTargetsSyncing] = useState(false);
+  const [localOnlyAccountTargets, setLocalOnlyAccountTargets] = useState<string[]>([]);
   const accountTargetsCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [rows, setRows] = useState<AccountRow[]>([]);
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
@@ -1256,7 +1262,7 @@ export default function Home() {
     }
   }, [isAccountEditorOpen]);
 
-  const clearCachedAccountData = () => {
+  const clearCachedAccountData = useCallback(() => {
     setRows([]);
     setHistoryRows([]);
     setLatestCollection(null);
@@ -1268,41 +1274,60 @@ export default function Home() {
     setDisplayNameOverrides({});
     setLegendColors({});
     chartSelectionInitialized.current = false;
+    setAccountTargetsSyncReady(false);
+    setAccountTargetsRevision(null);
+    setLocalOnlyAccountTargets([]);
     try {
-      const storedTargets = loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY);
-      const currentTargets = normalizeStoredHandleTargets(accountInput).handles;
-      if (isAdmin && (currentTargets.length > 0 || storedTargets.length === 0)) {
-        savePersistedAccountTargets(window.localStorage, currentTargets);
-      }
       clearCachedDashboardAccountData(window.localStorage, DASHBOARD_STORAGE_KEY);
     } catch {
-      // Preserve a working logout even when browser storage is unavailable.
+      // Preserve the sign-out flow if browser storage is unavailable.
     }
-  };
+  }, []);
 
-  const loadAdminStatus = async () => {
+  const syncAccountTargetsOnLogin = useCallback(async () => {
+    setAccountTargetsSyncReady(false);
+    setIsAccountTargetsSyncing(true);
     try {
-      const response = await fetch(`${window.location.origin}/api/admin/status`, { credentials: "same-origin", cache: "no-store" });
-      const payload = (await response.json().catch(() => ({}))) as AdminStatus;
-      const mode = response.ok && payload.readMode === "public" ? "public" : "private";
-      const authenticated = Boolean(response.ok && payload.isAdmin);
-      setReadMode(mode);
-      setIsAdmin(authenticated);
-      if (!authenticated) setActiveTab("results");
-      if (mode === "public" || authenticated) await loadHistory();
-      else {
-        clearCachedAccountData();
-        setHistoryError(null);
+      const stored = loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY);
+      const localBackup = loadLocallySavedAccountTargets(window.localStorage);
+      const localCandidates = [...new Map([...localBackup, ...stored].map((handle) => [handle.toLowerCase(), handle])).values()];
+      const response = await fetch("/api/admin/account-targets", { credentials: "same-origin", cache: "no-store" });
+      const payload = await response.json().catch(() => ({})) as AccountTargetsResponse;
+      if (!response.ok) throw new Error(payload.error ?? "共有アカウント一覧を読み込めませんでした。");
+      let shared = payload;
+      if (!payload.initialized) {
+        const initialized = await fetch("/api/admin/account-targets", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          cache: "no-store",
+          body: JSON.stringify({ action: "initialize", expectedRevision: payload.revision ?? 0, handles: localCandidates.slice(0, MAX_ACCOUNTS) }),
+        });
+        shared = await initialized.json().catch(() => ({})) as AccountTargetsResponse;
+        if (!initialized.ok && initialized.status !== 409) throw new Error(shared.error ?? "共有アカウント一覧を初期化できませんでした。");
       }
-    } catch {
-      setReadMode("private");
-      setIsAdmin(false);
-      setActiveTab("results");
-      clearCachedAccountData();
+      const sharedHandles = normalizeStoredHandleTargets((shared.handles ?? []).join("\n")).handles;
+      const sharedSet = new Set(sharedHandles.map((handle) => handle.toLowerCase()));
+      const localOnly = localCandidates.filter((handle) => !sharedSet.has(handle.toLowerCase()));
+      setAccountInput(sharedHandles.join("\n"));
+      setAccountTargetsRevision(Number(shared.revision ?? 0));
+      setLocalOnlyAccountTargets(localOnly);
+      try {
+        savePersistedAccountTargets(window.localStorage, sharedHandles);
+        saveLocallySavedAccountTargets(window.localStorage, localOnly);
+      } catch {
+        // D1 remains the source of truth when this browser blocks local storage.
+      }
+      setAccountTargetsSyncReady(true);
+      return true;
+    } catch (error) {
+      setAccountTargetsSyncReady(false);
+      setNotice({ tone: "error", message: error instanceof Error ? error.message : "共有アカウント一覧を同期できませんでした。" });
+      return false;
     } finally {
-      setIsReadAccessReady(true);
+      setIsAccountTargetsSyncing(false);
     }
-  };
+  }, []);
 
   const syncCurrentAvatars = async (accountRows: AccountRow[]) => {
     if (!isAdmin) return false;
@@ -1330,11 +1355,13 @@ export default function Home() {
       const response = await fetch(`${window.location.origin}/api/admin/login`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ key: adminKeyInput }) });
       const payload = (await response.json().catch(() => ({}))) as AdminStatus;
       if (!response.ok) throw new Error(payload.error ?? "管理者ログインに失敗しました。");
-      setAccountInput(loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY).join("\n"));
       setIsAdmin(true);
       setAdminKeyInput("");
       setAdminLoginOpen(false);
-      setNotice({ tone: "success", message: "管理者モードに切り替えました。" });
+      const targetsSynced = await syncAccountTargetsOnLogin();
+      setNotice(targetsSynced
+        ? { tone: "success", message: "管理者モードに切り替え、共有アカウント一覧を読み込みました。" }
+        : { tone: "error", message: "ログインしましたが、共有アカウント一覧を読み込めませんでした。再読み込みしてください。" });
       await loadHistory();
     } catch (error) {
       setNotice({ tone: "error", message: error instanceof Error ? error.message : "管理者ログインに失敗しました。" });
@@ -1344,6 +1371,11 @@ export default function Home() {
   };
 
   const logoutAdmin = async () => {
+    try {
+      savePersistedAccountTargets(window.localStorage, normalizeStoredHandleTargets(accountInput).handles);
+    } catch {
+      // Keep a server-synced browser backup when local storage is unavailable.
+    }
     await fetch(`${window.location.origin}/api/admin/logout`, { method: "POST", credentials: "same-origin" }).catch(() => undefined);
     setIsAdmin(false);
     setActiveTab("results");
@@ -1353,7 +1385,7 @@ export default function Home() {
     if (readMode === "public") await loadHistory();
   };
 
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async () => {
     try {
       const response = await fetch(`${window.location.origin}/api/history`, { credentials: "same-origin", cache: "no-store" });
       const payload = (await response.json()) as HistoryResponse;
@@ -1381,15 +1413,38 @@ export default function Home() {
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : "履歴を読み込めませんでした");
     }
-  };
+  }, []);
+
+  const loadAdminStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${window.location.origin}/api/admin/status`, { credentials: "same-origin", cache: "no-store" });
+      const payload = (await response.json().catch(() => ({}))) as AdminStatus;
+      const mode = response.ok && payload.readMode === "public" ? "public" : "private";
+      const authenticated = Boolean(response.ok && payload.isAdmin);
+      setReadMode(mode);
+      setIsAdmin(authenticated);
+      if (!authenticated) setActiveTab("results");
+      if (authenticated) await syncAccountTargetsOnLogin();
+      if (mode === "public" || authenticated) await loadHistory();
+      else {
+        clearCachedAccountData();
+        setHistoryError(null);
+      }
+    } catch {
+      setReadMode("private");
+      setIsAdmin(false);
+      setActiveTab("results");
+      clearCachedAccountData();
+    } finally {
+      setIsReadAccessReady(true);
+    }
+  }, [clearCachedAccountData, loadHistory, syncAccountTargetsOnLogin]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- wait for the server read policy before restoring account-specific preferences. */
   useEffect(() => {
     if (!isReadAccessReady) return;
     const canReadAccountData = readMode === "public" || isAdmin;
     try {
-      const savedTargets = loadPersistedAccountTargets(window.localStorage, DASHBOARD_STORAGE_KEY);
-      if (isAdmin) setAccountInput(savedTargets.join("\n"));
       const saved = window.localStorage.getItem(DASHBOARD_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as PersistedDashboardState;
@@ -1438,13 +1493,13 @@ export default function Home() {
   }, [barColor, chartStatusFilter, chartTitle, chartTitleFontSize, compareLabelFontSize, displayNameOverrides, isHydrated, isReadAccessReady, isAdmin, legendColors, logScale, markerOutlineColor, markerOutlineWidth, markerSize, readMode, selectedHandles, showTrendLegend, statusFilter, theme, trendAxisFontSize, trendDateFontSize, trendLineWidth, trendValueFontSize, trendValueLabelColor]);
 
   useEffect(() => {
-    if (!isHydrated || !isReadAccessReady || !isAdmin) return;
+    if (!isHydrated || !isReadAccessReady || !isAdmin || !accountTargetsSyncReady) return;
     try {
       savePersistedAccountTargets(window.localStorage, normalizeStoredHandleTargets(accountInput).handles);
     } catch {
       // A restricted localStorage should not block account collection.
     }
-  }, [accountInput, isAdmin, isHydrated, isReadAccessReady]);
+  }, [accountInput, accountTargetsSyncReady, isAdmin, isHydrated, isReadAccessReady]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1479,7 +1534,7 @@ export default function Home() {
     const timer = window.setTimeout(() => { void loadAdminStatus(); }, 0);
     return () => window.clearTimeout(timer);
     // The admin cookie is checked once when the public dashboard opens.
-  }, []);
+  }, [loadAdminStatus]);
 
   useEffect(() => {
     if (!isAdmin || !rows.some((row) => row.status === "ok" && row.avatarUrl)) return;
@@ -1868,39 +1923,104 @@ export default function Home() {
     }
   };
 
+  const updateSharedAccountTargets = async (action: "add" | "merge" | "remove", handles: string[] = [], handle?: string) => {
+    if (!isAdmin || !accountTargetsSyncReady || isAccountTargetsSyncing) return false;
+    setIsAccountTargetsSyncing(true);
+    try {
+      const response = await fetch("/api/admin/account-targets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ action, expectedRevision: accountTargetsRevision ?? 0, handles, handle }),
+      });
+      const payload = await response.json().catch(() => ({})) as AccountTargetsResponse;
+      const sharedHandles = normalizeStoredHandleTargets((payload.handles ?? []).join("\n")).handles;
+      const sharedSet = new Set(sharedHandles.map((item) => item.toLowerCase()));
+      if (response.status === 409) {
+        const pending = action === "add" || action === "merge" ? handles : [];
+        const localCandidates = [...new Map([...loadLocallySavedAccountTargets(window.localStorage), ...pending].map((item) => [item.toLowerCase(), item])).values()];
+        const localOnly = localCandidates.filter((item) => !sharedSet.has(item.toLowerCase()));
+        setAccountInput(sharedHandles.join("\n"));
+        setAccountTargetsRevision(Number(payload.revision ?? 0));
+        setLocalOnlyAccountTargets(localOnly);
+        try {
+          savePersistedAccountTargets(window.localStorage, sharedHandles);
+          saveLocallySavedAccountTargets(window.localStorage, localOnly);
+        } catch {
+          // The latest shared list is already reflected in React state.
+        }
+        setAccountEditorFeedback(payload.error ?? "共有一覧が更新されました。内容を確認して再度操作してください。");
+        return false;
+      }
+      if (!response.ok) throw new Error(payload.error ?? "共有アカウント一覧を保存できませんでした。");
+      const localOnly = loadLocallySavedAccountTargets(window.localStorage).filter((item) => !sharedSet.has(item.toLowerCase()));
+      setAccountInput(sharedHandles.join("\n"));
+      setAccountTargetsRevision(Number(payload.revision ?? accountTargetsRevision ?? 0));
+      setLocalOnlyAccountTargets(localOnly);
+      try {
+        savePersistedAccountTargets(window.localStorage, sharedHandles);
+        saveLocallySavedAccountTargets(window.localStorage, localOnly);
+      } catch {
+        // Keep D1 as the shared source even when browser-local backup fails.
+      }
+      return true;
+    } catch (error) {
+      setAccountEditorFeedback(error instanceof Error ? error.message : "共有アカウント一覧を保存できませんでした。");
+      return false;
+    } finally {
+      setIsAccountTargetsSyncing(false);
+    }
+  };
+
+  const mergeLocalOnlyAccountTargets = async () => {
+    if (!localOnlyAccountTargets.length) return;
+    const count = localOnlyAccountTargets.length;
+    const merged = await updateSharedAccountTargets("merge", localOnlyAccountTargets);
+    if (merged) setAccountEditorFeedback(`${count}件を共有一覧に追加しました。`);
+  };
+
   const openAccountEditor = () => {
     const normalized = normalizeStoredHandleTargets(accountInput);
     setAccountInput(normalized.handles.join("\n"));
     setAccountEditorDraft("");
     setAccountEditorFeedback(
-      normalized.errors.length
-        ? `${normalized.errors.length}件の形式不正な入力を取得対象から除外しました。`
-        : null,
+      !accountTargetsSyncReady
+        ? "共有一覧を読み込んでいます。完了後に編集できます。"
+        : normalized.errors.length
+          ? `${normalized.errors.length}件の形式不正な入力を取得対象から除外しました。`
+          : null,
     );
     setIsAccountEditorOpen(true);
   };
 
-  const addAccountTargets = () => {
+  const addAccountTargets = async () => {
     const existingHandles = parseHandleTargetInput(accountInput).handles;
     const result = addHandleTargets(existingHandles, accountEditorDraft, MAX_ACCOUNTS);
-    setAccountInput(result.handles.join("\n"));
-    setAccountEditorDraft("");
-
     const messages = [];
-    if (result.added.length) messages.push(`${result.added.length}件を取得対象に追加しました。`);
     if (result.errors.length) messages.push(`${result.errors.length}件はハンドルとして認識できませんでした。`);
     if (result.overflow) messages.push(`登録上限のため、${result.overflow}件は追加されませんでした。`);
-    setAccountEditorFeedback(messages.join(" ") || "新しく追加するアカウントはありませんでした。");
+    if (!result.added.length) {
+      setAccountEditorFeedback(messages.join(" ") || "新しく追加するアカウントはありませんでした。");
+      return;
+    }
+    const saved = await updateSharedAccountTargets("add", result.added);
+    if (!saved) return;
+    const addedSet = new Set(result.added.map((handle) => handle.toLowerCase()));
+    const overflowHandles = result.handles.filter((handle) => !existingHandles.some((existing) => existing.toLowerCase() === handle.toLowerCase()) && !addedSet.has(handle.toLowerCase()));
+    setAccountEditorDraft(overflowHandles.join("\n"));
+    messages.unshift(`${result.added.length}件を共有一覧に追加しました。`);
+    setAccountEditorFeedback(messages.join(" "));
     window.requestAnimationFrame(() => accountEditorInputRef.current?.focus());
   };
 
-  const removeAccountTarget = (handle: string) => {
-    const existingHandles = parseHandleTargetInput(accountInput).handles;
-    setAccountInput(removeHandleTarget(existingHandles, handle).join("\n"));
+  const removeAccountTarget = async (handle: string) => {
+    const saved = await updateSharedAccountTargets("remove", [], handle);
+    if (saved) setAccountEditorFeedback(`@${handle}を共有一覧から外しました。過去データは保持されています。`);
   };
 
   const collect = async () => {
-    if (!isAdmin || isLoading || collectInFlight.current) return;
+    if (!isAdmin || !accountTargetsSyncReady || isAccountTargetsSyncing || isLoading || collectInFlight.current) return;
     const parsedTargets = normalizeStoredHandleTargets(accountInput);
     const handles = parsedTargets.handles;
     setAccountInput(handles.join("\n"));
@@ -2005,7 +2125,7 @@ export default function Home() {
     <main className="site-shell">
       <header className="topbar editorial-topbar">
         <div className="brand editorial-brand"><div className="brand-mark editorial-brand-mark" role="img" aria-label="グラフマーク"><span className="brand-bar brand-bar-short" /><span className="brand-bar brand-bar-medium" /><span className="brand-bar brand-bar-tall" /></div><div className="editorial-brand-copy"><p className="brand-name">複垢データベース</p></div></div>
-        <div className="topbar-meta editorial-topbar-meta"><div className="collection-status-meta"><span>取得元: fxTwitter</span><span>{latestCollectionLabel}</span></div><span className="topbar-divider" /><span>公開共有モード</span><button className="theme-toggle editorial-theme-toggle" type="button" onClick={toggleTheme} aria-pressed={theme === "dark"}>{theme === "dark" ? "☼ ライト" : "◐ ダーク"}</button></div>
+        <div className="topbar-meta editorial-topbar-meta"><div className="collection-status-meta"><span>取得元: fxTwitter</span><span>{latestCollectionLabel}</span></div><span className="topbar-divider" /><span>公開共有モード</span><button className="theme-toggle editorial-theme-toggle" type="button" onClick={toggleTheme} aria-pressed={theme === "dark"} aria-label={theme === "dark" ? "ライトモードに切り替え" : "ダークモードに切り替え"}><span className="theme-toggle-icon" aria-hidden="true">{theme === "dark" ? "☼" : "◐"}</span><span className="theme-toggle-label">{theme === "dark" ? "ライト" : "ダーク"}</span></button></div>
       </header>
 
       <section className="hero-section">
@@ -2016,7 +2136,7 @@ export default function Home() {
               <span className="input-count">{accountTargetHandles.length} / {MAX_ACCOUNTS} アカウントを登録中</span>
               <div className="input-actions">
                 <button type="button" className="secondary-button" onClick={openAccountEditor}>取得対象を編集</button>
-                <button type="button" className="primary-button" onClick={collect} disabled={isLoading}>{isLoading ? <><span className="button-spinner" />取得中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button>
+                <button type="button" className="primary-button" onClick={collect} disabled={isLoading || !accountTargetsSyncReady || isAccountTargetsSyncing}>{isLoading ? <><span className="button-spinner" />取得中…</> : isAccountTargetsSyncing ? <><span className="button-spinner" />共有中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button>
               </div>
             </div>
 
@@ -2054,17 +2174,21 @@ export default function Home() {
                 </label>
                 <div className="account-editor-add-row">
                   <span className="input-count">{accountTargetHandles.length} / {MAX_ACCOUNTS} 件登録済み</span>
-                  <button type="button" className="primary-button" onClick={addAccountTargets}>追加</button>
+                  <button type="button" className="primary-button" onClick={() => void addAccountTargets()} disabled={!accountTargetsSyncReady || isAccountTargetsSyncing}>{isAccountTargetsSyncing ? <><span className="button-spinner" aria-hidden="true" />共有中…</> : "追加"}</button>
                 </div>
                 <div className="account-target-heading">
                   <h3>登録アカウント一覧</h3>
                   <button type="button" className={`secondary-button account-copy-button${accountTargetsCopied ? " is-copied" : ""}`} disabled={!accountTargetHandles.length} aria-label={accountTargetsCopied ? "登録アカウントをコピーしました" : "登録アカウントを改行区切りでコピー"} onClick={async () => { try { await copyTextToClipboard(formatHandleTargetsForClipboard(accountTargetHandles)); setAccountEditorFeedback(`${accountTargetHandles.length}件のアカウントをコピーしました。`); setAccountTargetsCopied(true); if (accountTargetsCopyTimerRef.current) clearTimeout(accountTargetsCopyTimerRef.current); accountTargetsCopyTimerRef.current = setTimeout(() => { setAccountTargetsCopied(false); accountTargetsCopyTimerRef.current = null; }, 1800); } catch { setAccountTargetsCopied(false); setAccountEditorFeedback("クリップボードへコピーできませんでした。"); } }}>{accountTargetsCopied ? "✓ コピーしました" : "一覧をコピー"}</button>
                   <span>{accountTargetHandles.length}件</span>
                 </div>
+                {localOnlyAccountTargets.length > 0 && <div className="account-target-local-notice" role="status">
+                  <span>この端末だけに保存されているアカウントが{localOnlyAccountTargets.length}件あります。共有一覧にはまだ追加されていません。</span>
+                  <button type="button" className="secondary-button" onClick={() => void mergeLocalOnlyAccountTargets()} disabled={!accountTargetsSyncReady || isAccountTargetsSyncing}>{isAccountTargetsSyncing ? "共有中…" : "この端末の未共有アカウントを共有一覧に追加"}</button>
+                </div>}
                 {accountTargetHandles.length ? <ul className="account-target-list" aria-label="取得対象アカウント">
                   {accountTargetHandles.map((handle) => <li className="account-target-chip" key={handle.toLowerCase()}>
                     <span>@{handle}</span>
-                    <button type="button" className="account-target-remove" aria-label={`@${handle}を取得対象から外す`} onClick={() => removeAccountTarget(handle)}>×</button>
+                    <button type="button" className="account-target-remove" aria-label={`@${handle}を取得対象から外す`} onClick={() => void removeAccountTarget(handle)} disabled={!accountTargetsSyncReady || isAccountTargetsSyncing}>×</button>
                   </li>)}
                 </ul> : <p className="account-target-empty">登録済みアカウントはありません。</p>}
                 {accountEditorFeedback && <p className="account-editor-feedback" role="status">{accountEditorFeedback}</p>}

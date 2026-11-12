@@ -49,6 +49,7 @@ const reads = [
   { path: "/api/avatar?accountId=missing-read-test", publicStatus: 404 },
   { path: "/api/import/mappings", publicStatus: 200, adminOnly: true },
   { path: "/api/admin/historical-data?metric=followers", publicStatus: 200, adminOnly: true },
+  { path: "/api/admin/account-targets", publicStatus: 200, adminOnly: true },
   { path: "/api/admin/nflf-duplicate", publicStatus: 200, adminOnly: true },
   { path: "/api/microsoft/status", publicStatus: 200, adminOnly: true },
   { path: "/api/microsoft/files", publicStatus: 503, adminOnly: true },

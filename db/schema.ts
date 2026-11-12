@@ -35,6 +35,14 @@ export const xstatsSnapshots = sqliteTable("xstats_snapshots", {
 }, (table) => ({ sessionIndex: index("xstats_snapshots_session_idx").on(table.sessionId, table.fetchedAt) }));
 
 /** Canonical one-account/one-JST-day history used by the administrator editor. */
+export const xstatsAccountTargets = sqliteTable("xstats_account_targets", {
+  sessionId: text("session_id").primaryKey(),
+  handlesJson: text("handles_json").notNull().default("[]"),
+  revision: integer("revision").notNull().default(0),
+  initialized: integer("initialized").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const xstatsDailyHistory = sqliteTable("xstats_daily_history", {
   id: text("id").primaryKey(),
   sessionId: text("session_id").notNull(),
@@ -147,6 +155,13 @@ export const xstatsMicrosoftTokens = sqliteTable("xstats_microsoft_tokens", {
 });
 
 export const schemaSql = {
+  accountTargets: `CREATE TABLE IF NOT EXISTS xstats_account_targets (
+    session_id TEXT PRIMARY KEY,
+    handles_json TEXT NOT NULL DEFAULT '[]',
+    revision INTEGER NOT NULL DEFAULT 0,
+    initialized INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+  )`,
   sessions: `CREATE TABLE IF NOT EXISTS xstats_sessions (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
