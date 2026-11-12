@@ -1148,10 +1148,6 @@ function rowMetaAvatar(row: AccountRow | HistoryRow | undefined, x: number, y: n
   return <><rect className="chart-row-avatar chart-row-avatar-fallback" x={x} y={y} width={size} height={size} rx="2" /><text className="chart-row-avatar-letter" x={x + size / 2} y={y + size / 2 + 3} textAnchor="middle">{handle.slice(0, 1).toUpperCase()}</text></>;
 }
 
-function AppBadge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "accent" | "danger" }) {
-  return <span className={`status-pill status-${tone}`}>{children}</span>;
-}
-
 export default function Home() {
   const [accountInput, setAccountInput] = useState("");
   const [isAccountEditorOpen, setIsAccountEditorOpen] = useState(false);
