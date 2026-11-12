@@ -98,8 +98,8 @@ try {
       await page.getByRole("tab", { name: "過去データ追加" }).click();
       await page.locator(".historical-grid-wrap").waitFor({ state: "visible" });
       assert.ok(await page.locator(".historical-scroll-hint").isVisible(), "mobile historical grid should explain horizontal scrolling");
-      assert.equal(await page.locator(".historical-grid th:nth-child(2)").evaluate((element) => getComputedStyle(element).position), "static", "the handle column should not be pinned");
-      assert.equal(await page.locator(".historical-grid th:nth-child(3)").evaluate((element) => getComputedStyle(element).position), "sticky", "the display-name column should remain pinned");
+      assert.equal(await page.locator(".historical-grid th:nth-child(2)").evaluate((element) => getComputedStyle(element).left), "auto", "the handle column should not be horizontally pinned");
+      assert.equal(await page.locator(".historical-grid th:nth-child(3)").evaluate((element) => getComputedStyle(element).left), "0px", "the display-name column should remain horizontally pinned");
       const mobileHistoricalInputFontSize = Number.parseFloat(await page.locator(".historical-number-input").first().evaluate((element) => getComputedStyle(element).fontSize));
       assert.ok(mobileHistoricalInputFontSize < desktopHistoricalInputFontSize, "mobile historical cells should use smaller text than desktop");
       assert.ok(brandFontSize < desktopBrandFontSize, "responsive title should fit the mobile header while remaining enlarged");
