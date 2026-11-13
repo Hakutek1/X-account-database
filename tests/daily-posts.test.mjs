@@ -3,10 +3,11 @@ import test from "node:test";
 
 import { ensureDailyHistory, ensureDailyPostsThroughToday } from "../lib/daily-history.ts";
 
-function fakeDatabase({ openingDates = [], dailyRows = [], snapshots = [], existingRows = [], freezeDates = [] } = {}) {
+function fakeDatabase({ openingDates = [], dailyRows = [], snapshots = [], existingRows = [], freezeDates = [], suspendedAccounts = [] } = {}) {
   const batched = [];
   const executed = [];
   const all = async (sql) => {
+    if (sql.includes("status = 'suspended'")) return { results: suspendedAccounts };
     if (sql.includes('PRAGMA table_info("xstats_account_statuses")')) return { results: [{ name: "freeze_date" }] };
     if (sql.includes("SELECT account_id, freeze_date FROM xstats_account_statuses")) return { results: freezeDates };
     if (sql.includes("origin FROM xstats_daily_history") && sql.includes("posts IS NOT NULL")) return { results: dailyRows };
@@ -149,4 +150,13 @@ test("legacy bucket migration does not move a row past its freeze date", async (
   assert.equal(batches.length, 0, "legacy data must not be deleted or shifted beyond the freeze date");
   assert.equal(writes.some(({ sql }) => sql.includes("UPDATE xstats_daily_history_meta SET backfilled = 2")), true);
   assert.equal(writes.some(({ sql }) => /\bxstats_daily_history\b/.test(sql)), false);
+});
+
+test("suspended accounts never receive carry-forward with or without a freeze date", async () => {
+ for (const freezeDate of [null, "2026-08-03"]) {
+  const database = fakeDatabase({suspendedAccounts:[{account_id:"a"}],freezeDates:[{account_id:"a",freeze_date:freezeDate}],snapshots:[{account_id:"a",handle:"alpha",display_name:"Alpha",posts:12,fetched_at:"2026-08-01T14:00:00.000Z"}],existingRows:[{account_id:"a",date:"2026-08-04",posts:12,origin:"carry-forward"}],openingDates:[{account_id:"a",joined_at:"2026-08-01T00:00:00.000Z"}]});
+  await ensureDailyPostsThroughToday(database,"shared","2026-08-05");
+  assert.equal(database.batched.length,0,"existing rows must remain untouched until backed up");
+  assert.equal(database.executed.length,0);
+ }
 });
