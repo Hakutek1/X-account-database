@@ -169,7 +169,13 @@ try {
     if (viewport.width <= 680) {
       assert.equal(await page.locator(".table-scroll-hint").isVisible(), false, "mobile cards should not show a table scroll hint");
       await page.getByRole("button", { name: "活動終了", exact: true }).click();
+      await page.getByRole("button", { name: "活動中", exact: true }).click();
       await page.locator(".results-mobile-cards").waitFor({ state: "visible" });
+      assert.equal(await page.locator(".results-mobile-cards [role='listitem']").count(), 0, "the ended filter should not include frozen accounts");
+      await page.getByRole("button", { name: "凍結", exact: true }).click();
+      assert.equal(await page.locator(".results-mobile-cards [role='listitem']").count(), 1, "the frozen filter should render only frozen accounts");
+      assert.match(await page.locator(".results-mobile-card").first().innerText(), /@account_b/);
+      await page.getByRole("button", { name: "全て", exact: true }).click();
       assert.equal(await page.locator(".results-mobile-cards [role='listitem']").count(), 2, "mobile results should render one card per account");
       assert.equal(await page.locator(".results-display > .table-shell").isVisible(), false, "the wide results table should be hidden on mobile");
       await page.screenshot({ path: join(outputDirectory, `results-${viewport.name}.png`), fullPage: true });
