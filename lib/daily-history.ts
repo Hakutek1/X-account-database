@@ -266,7 +266,7 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
   const openingDateByAccount = new Map(openingDates.results.map((row) => [row.account_id, jstCalendarDate(row.joined_at)] as const));
   const staleCarryForwardKeys = new Set<string>();
   for (const row of existing.results) {
-    if (row.origin !== "carry-forward" || freezeDateByAccount.get(row.account_id)) continue;
+    if (row.origin !== "carry-forward" || suspendedIds.has(row.account_id) || freezeDateByAccount.get(row.account_id)) continue;
     const openingDate = openingDateByAccount.get(row.account_id);
     if (!openingDate || row.date <= openingDate) continue;
     const expected = (recordedPostsByAccount.get(row.account_id) ?? [])
