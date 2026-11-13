@@ -1,3 +1,5 @@
+import { normalizeStoredHandleTargets } from "./account-targets.ts";
+
 type PublicRun = {
   id: string;
   fetched_at: string;
@@ -20,6 +22,18 @@ export type ReadOnlyHistoryDatabase = {
   prepare(query: string): ReadStatement;
 };
 
+function countStoredTargets(handlesJson: string | null | undefined) {
+  if (!handlesJson) return 0;
+  try {
+    const parsed: unknown = JSON.parse(handlesJson);
+    if (!Array.isArray(parsed)) return 0;
+    const normalized = normalizeStoredHandleTargets(parsed.filter((handle): handle is string => typeof handle === "string").join("\n"));
+    return Math.min(normalized.handles.length, 500);
+  } catch {
+    return 0;
+  }
+}
+
 function isImportedRun(sourceSummary: string | null | undefined) {
   if (!sourceSummary) return false;
   try {
@@ -34,9 +48,10 @@ export async function buildPublicHistoryResponse<Row extends PublicHistoryRow>(
   sessionId: string,
   loadRows: () => Promise<Row[]>,
 ) {
-  const [runs, rows] = await Promise.all([
+  const [runs, rows, targetTargets] = await Promise.all([
     database.prepare("SELECT id, fetched_at, success_count, error_count, source_summary FROM xstats_runs WHERE session_id = ? ORDER BY fetched_at DESC").bind(sessionId).all<PublicRun>(),
     loadRows(),
+    database.prepare("SELECT handles_json FROM xstats_account_targets WHERE session_id = ?").bind(sessionId).all<{ handles_json: string }>(),
   ]);
 
   const knownRunIds = new Set(runs.results.map((run) => run.id));
@@ -60,6 +75,7 @@ export async function buildPublicHistoryResponse<Row extends PublicHistoryRow>(
   return {
     runs: publicRuns,
     rows,
+    registeredAccountCount: countStoredTargets(targetTargets.results[0]?.handles_json),
     latestCollection: latestCollectionRun
       ? {
           fetched_at: latestCollectionRun.fetched_at,

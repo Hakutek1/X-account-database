@@ -651,7 +651,7 @@ html[data-theme="dark"] .top15-rank-1 .top15-rank { color: var(--rank-one-ink); 
 .chart-panel .chart-controls label, .chart-panel .axis-settings label { min-width: 0; }
 .chart-panel .chart-title-control, .chart-panel .axis-title, .chart-panel .axis-settings > .axis-commit-help { grid-column: 1 / -1; }
 .chart-panel .chart-control-spacer { display: none; }
-.chart-panel .chart-export-button { grid-column: -2 / -1; justify-self: stretch; }
+.chart-panel .image-share-menu.chart-export-control { grid-column: -2 / -1; justify-self: stretch; }
 .chart-panel .chart-date-pair { grid-column: 1 / span 3; min-width: 0; }
 .chart-panel .account-picker { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .chart-panel .account-picker-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-width: 0; }
@@ -677,8 +677,8 @@ html[data-theme="dark"] .top15-rank-1 .top15-rank { color: var(--rank-one-ink); 
 
   .chart-panel .chart-controls-primary, .chart-panel .chart-controls-secondary, .chart-panel .axis-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .chart-panel .chart-controls label, .chart-panel .axis-settings label { min-width: 0; }
-  .chart-panel .chart-export-button, .chart-panel .chart-date-pair { grid-column: 1 / -1; }
-  .chart-panel .chart-export-button { justify-self: stretch; }
+  .chart-panel .image-share-menu.chart-export-control, .chart-panel .chart-date-pair { grid-column: 1 / -1; }
+  .chart-panel .image-share-menu.chart-export-control { justify-self: stretch; }
   .chart-panel .account-picker-list { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .chart-panel .account-check { padding: 6px 7px; font-size: .74rem; }
   .chart-panel .account-picker-toolbar { gap: 7px; }
@@ -1190,4 +1190,535 @@ html[data-theme="dark"] .account-copy-button.is-copied { color: #a2e2d0; border-
   .chart-panel .chart-setting-disclosure .axis-commit-help { grid-column: auto; }
   .chart-panel .chart-setting-disclosure .axis-settings .toggle-field { grid-column: auto; }
   .chart-setting-disclosure-toggle { min-height: 46px; }
+}
+
+/* Product identity and compact result controls. */
+@font-face {
+  font-family: "Zen Kaku Gothic New";
+  src: url("/fonts/ZenKakuGothicNew-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+.editorial-topbar {
+  display: flex;
+  flex-wrap: nowrap;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 96px;
+  gap: 16px;
+}
+.brand-graph-decoration {
+  position: absolute;
+  z-index: 0;
+  inset: 0 0 1px;
+  width: 100%;
+  height: calc(100% - 1px);
+  pointer-events: none;
+}
+.brand-graph-bars { fill: rgba(255, 255, 255, .30); }
+.brand-graph-line {
+  fill: none;
+  stroke: rgba(255, 255, 255, .30);
+  stroke-width: 2.4;
+  opacity: 1;
+  vector-effect: non-scaling-stroke;
+}
+.editorial-brand,
+.editorial-topbar-meta { position: relative; z-index: 1; }
+.editorial-brand { min-width: 0; flex: 1 1 auto; }
+.editorial-brand .brand-name {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  font-size: clamp(1.7rem, 3vw, 2.65rem);
+  font-weight: 700;
+  letter-spacing: .015em;
+  line-height: 1.25;
+}
+.editorial-topbar-meta { flex: 0 0 auto; margin-left: auto; }
+.editorial-theme-toggle .theme-toggle-icon svg {
+  display: block;
+  width: 1.15em;
+  height: 1.15em;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+html[data-theme="light"] .brand-graph-bars { fill: rgba(16, 142, 151, .17); }
+html[data-theme="light"] .brand-graph-line { stroke: rgba(8, 109, 119, .62); opacity: .8; }
+
+.editorial-workspace-tabs { gap: 8px; }
+.editorial-workspace-tabs button { min-height: 46px; padding-inline: 19px; font-size: .98rem; }
+.results-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -7px 0 12px;
+}
+.results-date-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.calendar-toggle {
+  display: inline-grid;
+  flex: 0 0 40px;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 9px;
+  border: 1px solid var(--silver-soft);
+  border-radius: 2px;
+  color: var(--teal-dark);
+  background: transparent;
+}
+.calendar-toggle:hover:not(:disabled),
+.calendar-toggle[aria-expanded="true"] {
+  border-color: var(--teal);
+  color: var(--paper);
+  background: var(--teal-dark);
+}
+.calendar-toggle:disabled { opacity: .45; }
+.calendar-toggle svg,
+.display-name-edit-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+.results-date-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.results-date-copy > strong {
+  color: var(--ink);
+  font-size: .88rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+.results-date-copy .collection-status-inline { font-size: .69rem; }
+.results-calendar-panel,
+.ranking-calendar-panel {
+  width: min(100%, 460px);
+  margin: -2px 0 14px;
+}
+.results-calendar-panel .top15-date-picker,
+.ranking-calendar-panel .top15-date-picker { max-width: 100%; }
+.display-name-edit-toggle {
+  display: inline-flex;
+  min-width: 112px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 2px;
+  font-size: .78rem;
+}
+.display-name-edit-toggle.is-active {
+  border-color: var(--teal-dark);
+  color: var(--paper);
+  background: var(--teal-dark);
+}
+.display-name-input {
+  width: min(210px, 100%);
+  min-height: 31px;
+  padding: 2px 0;
+  border-color: transparent;
+  border-radius: 0;
+  color: var(--ink);
+  background: transparent;
+  font-size: .85rem;
+  font-weight: 720;
+  cursor: default;
+}
+.display-name-input:read-only { box-shadow: none; }
+.display-name-input.is-editing {
+  padding-inline: 7px;
+  border-color: var(--teal);
+  background: var(--card);
+  cursor: text;
+}
+.results-mobile-name input:read-only { border-color: transparent; background: transparent; box-shadow: none; cursor: default; }
+.results-mobile-name input.is-editing { border-color: var(--teal); background: var(--card); }
+.ranking-primary-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.ranking-export-button { min-height: 40px; border-radius: 2px; }
+.ranking-calendar-panel { margin-top: 10px; }
+.site-footer { align-items: center; }
+.footer-source { margin-left: -10px; }
+
+@media (max-width: 680px) {
+  .site-shell .editorial-topbar {
+    flex-wrap: nowrap;
+    min-height: 66px;
+    gap: 8px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .editorial-brand { flex: 1 1 auto; }
+  .editorial-brand .brand-name { font-size: clamp(1.12rem, 5.1vw, 1.48rem); white-space: nowrap; }
+  .site-shell .editorial-topbar-meta { width: auto; margin-left: auto; justify-content: flex-end; }
+  .editorial-theme-toggle { flex: 0 0 38px; width: 38px; min-width: 38px; min-height: 38px; }
+  .editorial-workspace-tabs { width: 100%; gap: 0; }
+  .editorial-workspace-tabs button { flex: 1 1 0; min-width: 0; min-height: 48px; padding-inline: 4px; font-size: clamp(.76rem, 3.4vw, .9rem); text-align: center; white-space: nowrap; }
+  .results-control-row { align-items: stretch; flex-wrap: wrap; margin-top: 0; }
+  .results-date-control { flex: 1 1 100%; }
+  .results-date-copy .collection-status-inline { gap: 0; }
+  .display-name-edit-toggle { width: 100%; }
+  .results-calendar-panel { width: 100%; }
+  .ranking-primary-controls { align-items: stretch; }
+  .ranking-primary-controls .results-date-control { flex: 1 1 auto; min-width: 0; }
+  .ranking-primary-controls .results-date-copy .collection-status-inline { display: none; }
+  .ranking-export-button { flex: 0 0 auto; }
+  .ranking-calendar-panel { width: 100%; }
+  .site-footer { gap: 8px 14px; }
+  .footer-source { margin-left: -8px; }
+  html[data-theme="dark"] .brand-graph-bars { fill: rgba(255, 255, 255, .3); }
+}
+
+
+/* Stage 2: registered-count summary, compact mobile controls, and persistent date access. */
+.editorial-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
+}
+.editorial-summary-grid .summary-card:not(.summary-card--export):hover {
+  border-color: var(--silver-soft);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.editorial-summary-grid .summary-card--accounts strong {
+  font-size: clamp(1.3rem, 2vw, 1.8rem);
+  letter-spacing: -.035em;
+  white-space: nowrap;
+}
+.calendar-toggle-label {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.results-mobile-metric-value {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+.results-mobile-metric-value strong,
+.results-mobile-metric-value small {
+  min-width: 0;
+  white-space: nowrap;
+}
+.results-mobile-metric-value small {
+  flex: 0 0 auto;
+  font-size: 9px;
+}
+@media (max-width: 680px) {
+  .hero-section .input-footer {
+    align-items: center;
+    flex-direction: row;
+    gap: 0;
+  }
+  .hero-section .input-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .hero-section .input-actions .secondary-button,
+  .hero-section .input-actions .primary-button {
+    width: 100%;
+    min-width: 0;
+    height: 46px;
+    min-height: 46px;
+    padding-inline: 5px;
+    font-size: clamp(.61rem, 3.1vw, .76rem);
+    white-space: nowrap;
+  }
+  .editorial-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .editorial-summary-grid .summary-card,
+  .editorial-summary-grid .summary-card--export {
+    min-width: 0;
+    min-height: 94px;
+    padding: 10px;
+  }
+  .editorial-summary-grid .summary-card--accounts strong {
+    font-size: clamp(1rem, 5vw, 1.3rem);
+  }
+  .editorial-summary-grid .summary-card--export {
+    grid-column: auto;
+    border-right: 1px solid var(--silver-soft);
+    border-bottom: 1px solid var(--silver-soft);
+    gap: 7px;
+  }
+  .editorial-summary-grid .summary-card--export .export-icon {
+    flex-basis: 28px;
+    width: 28px;
+    height: 28px;
+  }
+  .calendar-toggle-label {
+    display: none;
+  }
+  .results-mobile-metric-value strong { font-size: 13px; }
+  .results-mobile-metric-value small { font-size: 8px; }
+}
+
+
+/* Stage 3: compact chart controls and anchored date popovers. */
+.chart-panel .chart-controls-primary.chart-controls-summary {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 14px;
+  min-width: 0;
+  padding: 9px 11px;
+  overflow: visible;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.chart-panel .chart-controls-primary.chart-controls-summary > .chart-date-pair {
+  display: flex;
+  grid-column: 1;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  overflow: visible;
+}
+.chart-panel .chart-date-control {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.chart-panel .chart-date-control.is-open { z-index: 20; }
+.chart-panel .chart-date-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.chart-panel .chart-calendar-toggle { flex: 0 0 38px; width: 38px; height: 38px; }
+.chart-panel .chart-date-copy { min-width: 0; gap: 1px; }
+.chart-panel .chart-date-copy > span { color: var(--muted); font-size: .68rem; font-weight: 700; }
+.chart-panel .chart-date-copy > strong { font-size: .8rem; white-space: nowrap; }
+.chart-panel .chart-date-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 30;
+  width: min(340px, calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
+  padding: 8px;
+  border: 1px solid var(--silver-soft);
+  border-radius: 2px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+}
+.chart-panel .chart-date-popover[hidden] { display: none; }
+.chart-panel .chart-date-popover .top15-date-picker,
+.chart-panel .chart-date-popover .top15-date-picker-small { width: 100%; max-width: 100%; }
+.chart-panel .chart-date-clear {
+  display: block;
+  min-height: 30px;
+  margin: 0 0 7px auto;
+  padding: 4px 8px;
+  border: 1px solid var(--silver-soft);
+  border-radius: 2px;
+  color: var(--teal-dark);
+  background: transparent;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.chart-panel .chart-selection-summary {
+  display: flex;
+  min-width: 92px;
+  flex-direction: column;
+  gap: 2px;
+}
+.chart-panel .chart-selection-summary span { color: var(--muted); font-size: .68rem; font-weight: 700; }
+.chart-panel .chart-selection-summary strong { color: var(--teal-dark); font-size: .88rem; white-space: nowrap; }
+.chart-panel .chart-export-button { min-width: 126px; min-height: 38px; }
+.chart-panel .chart-settings-grid { gap: 8px; margin-top: 8px; }
+.chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings .chart-title-control { grid-column: 1 / -1; }
+.chart-panel .chart-setting-disclosure .chart-style-settings {
+  border-color: transparent;
+  border-top-color: var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-theme="dark"] .chart-panel .chart-setting-disclosure .chart-style-settings { background: transparent; }
+.chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings input,
+.chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings select { width: 100%; min-width: 0; }
+@media (max-width: 680px) {
+  .chart-panel .chart-controls-primary.chart-controls-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px 9px;
+    padding: 8px 0;
+  }
+  .chart-panel .chart-controls-primary.chart-controls-summary > .chart-date-pair {
+    grid-column: 1 / -1;
+    width: 100%;
+    gap: 7px;
+  }
+  .chart-panel .chart-date-control-row { gap: 6px; }
+  .chart-panel .chart-calendar-toggle { flex-basis: 36px; width: 36px; height: 36px; padding: 7px; }
+  .chart-panel .chart-date-copy > span { font-size: .62rem; }
+  .chart-panel .chart-date-copy > strong { font-size: .72rem; }
+  .chart-panel .chart-date-control:last-child .chart-date-popover { right: 0; left: auto; }
+  .chart-panel .chart-selection-summary { grid-column: 1; min-width: 0; flex-direction: row; align-items: baseline; gap: 6px; }
+  .chart-panel .chart-selection-summary span { font-size: .64rem; }
+  .chart-panel .chart-selection-summary strong { font-size: .78rem; }
+  .chart-panel .image-share-menu.chart-export-control { grid-column: 2; min-width: 0; justify-self: stretch; }
+  .chart-panel .chart-export-button { min-width: 0; min-height: 36px; padding: 6px 9px; font-size: .72rem; white-space: nowrap; }
+  .chart-panel .chart-settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 9px; }
+  .chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings .chart-title-control { grid-column: auto; }
+}
+
+
+/* Image sharing keeps the existing PNG export and adds an explicit X handoff. */
+.image-share-menu {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  z-index: 5;
+}
+.image-share-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.image-share-trigger > span { font-size: .72em; }
+.image-share-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  width: max-content;
+  min-width: 176px;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--silver-soft);
+  border-radius: 2px;
+  background: var(--card);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .24);
+}
+.image-share-option {
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 1px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  font-size: .84rem;
+  font-weight: 700;
+}
+.image-share-option:hover,
+.image-share-option:focus-visible {
+  color: var(--teal-dark);
+  background: var(--aqua-soft);
+}
+.image-share-feedback {
+  display: grid;
+  max-width: min(340px, calc(100vw - 32px));
+  gap: 7px;
+  color: var(--muted);
+  font-size: .72rem;
+  line-height: 1.5;
+  text-align: right;
+}
+.image-share-open-x {
+  justify-self: end;
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--teal);
+  color: var(--teal-dark);
+  background: var(--aqua-soft);
+  font-weight: 750;
+  text-decoration: none;
+}
+.image-share-open-x:hover,
+.image-share-open-x:focus-visible {
+  color: var(--ink);
+  background: var(--teal);
+}
+@media (max-width: 680px) {
+  .image-share-menu { min-width: 0; }
+  .image-share-trigger { min-width: 0; padding-right: 7px; padding-left: 7px; font-size: .74rem; }
+  .image-share-feedback { font-size: .68rem; }
+}
+
+.ranking-export-control { align-self: flex-end; width: auto; }
+.chart-panel .image-share-menu.chart-export-control { min-width: 126px; }
+.chart-panel .image-share-menu.chart-export-control > .chart-export-button { width: 100%; }
+@media (max-width: 680px) {
+  .ranking-export-control { align-self: stretch; }
+  .ranking-export-control > .ranking-export-button { width: 100%; }
+  .chart-panel .image-share-menu.chart-export-control { min-width: 0; }
+  .chart-panel .image-share-menu.chart-export-control > .chart-export-button { width: 100%; }
+}
+
+/* Stage 4: keep chart controls compact on mobile without hiding settings. */
+@media (max-width: 680px) {
+  .chart-panel .chart-setting-disclosure .axis-settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+    padding: 10px;
+  }
+  .chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .chart-panel .chart-setting-disclosure .axis-settings.chart-primary-settings .chart-title-control {
+    grid-column: 1 / -1;
+  }
+  .chart-panel .chart-setting-disclosure .axis-settings .axis-commit-help {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+  .chart-panel .chart-setting-disclosure .axis-settings .toggle-field {
+    grid-column: 1 / -1;
+    min-width: 0;
+    margin: 0;
+  }
+  .chart-panel .chart-setting-disclosure .axis-settings label:not(.toggle-field) {
+    min-width: 0;
+  }
+  .chart-panel .chart-setting-disclosure .axis-settings input,
+  .chart-panel .chart-setting-disclosure .axis-settings select {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding-inline: 7px;
+    font-size: .78rem;
+  }
+  .chart-panel .chart-setting-disclosure .axis-settings label > span:first-child {
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+  }
 }

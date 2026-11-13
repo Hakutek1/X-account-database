@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildPublicHistoryResponse } from "../lib/public-history.ts";
 
-function makeDatabase({ runs = [], exclusions = [] } = {}) {
+function makeDatabase({ runs = [], exclusions = [], targetHandles = [] } = {}) {
   const queries = [];
   return {
     queries,
@@ -15,6 +15,7 @@ function makeDatabase({ runs = [], exclusions = [] } = {}) {
           async all() {
             if (query.includes("FROM xstats_runs")) return { results: runs };
             if (query.includes("FROM xstats_historical_account_exclusions")) return { results: exclusions };
+            if (query.includes("FROM xstats_account_targets")) return { results: [{ handles_json: JSON.stringify(targetHandles) }] };
             throw new Error(`Unexpected query: ${query}`);
           },
         };
@@ -32,7 +33,7 @@ test("public history returns collection freshness and performs only reads", asyn
     { run_id: "actual-run", fetched_at: "2026-10-30T03:00:00.000Z", account_id: "a1" },
     { run_id: "imported-run", fetched_at: "2020-01-01T03:00:00.000Z", account_id: "a1" },
   ];
-  const { database, queries } = makeDatabase({ runs });
+  const { database, queries } = makeDatabase({ runs, targetHandles: Array.from({ length: 124 }, (_, index) => `acct_${index}`) });
   const response = await buildPublicHistoryResponse(database, "shared", async () => rows);
 
   assert.deepEqual(response.latestCollection, {
@@ -41,20 +42,33 @@ test("public history returns collection freshness and performs only reads", asyn
     error_count: 1,
   });
   assert.deepEqual(response.rows, rows);
+  assert.equal(response.registeredAccountCount, 124);
+  assert.equal("registeredAccountHandles" in response, false, "the new registration field must expose only a count");
   assert.equal(response.runs[0].id, "imported-latest");
   assert.ok(response.runs.some((run) => run.id === "imported-run"));
   assert.ok(response.runs.every((run) => !("source_summary" in run)), "internal import metadata must not be returned");
   assert.equal("deletedAccountIds" in response, false);
   assert.equal("importIssues" in response, false);
-  assert.equal(queries.length, 1);
+  assert.equal(queries.length, 2);
+  assert.ok(queries.some((query) => /SELECT handles_json FROM xstats_account_targets/.test(query)));
   assert.ok(queries.every((query) => /^\s*SELECT\b/i.test(query)));
   assert.ok(queries.every((query) => !/xstats_import_issues/i.test(query)));
+});
+
+test("registered account count normalizes stored handles without exposing the list", async () => {
+  const { database } = makeDatabase({
+    targetHandles: ["Account_A", "@account_a", "https://x.com/Account_B", "bad-handle", 17],
+  });
+  const response = await buildPublicHistoryResponse(database, "shared", async () => []);
+  assert.equal(response.registeredAccountCount, 2);
+  assert.equal("registeredAccountHandles" in response, false);
 });
 
 test("public history reports the no-collection state without inventing a run", async () => {
   const { database } = makeDatabase();
   const response = await buildPublicHistoryResponse(database, "shared", async () => []);
   assert.equal(response.latestCollection, null);
+  assert.equal(response.registeredAccountCount, 0);
   assert.deepEqual(response.runs, []);
   assert.deepEqual(response.rows, []);
 });

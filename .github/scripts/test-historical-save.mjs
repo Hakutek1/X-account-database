@@ -165,8 +165,8 @@ try {
   await context.addInitScript(() => { window.confirm = () => true; });
   const page = await context.newPage();
   await page.goto(origin, { waitUntil: "domcontentloaded" });
-  await page.getByRole("tab", { name: "過去データ追加" }).waitFor({ state: "visible", timeout: 30000 });
-  await page.getByRole("tab", { name: "過去データ追加" }).click();
+  await page.getByRole("tab", { name: "全履歴編集" }).waitFor({ state: "visible", timeout: 30000 });
+  await page.getByRole("tab", { name: "全履歴編集" }).click();
   await page.locator(".historical-grid-wrap").waitFor({ state: "visible", timeout: 60000 });
   await page.waitForFunction(() => !document.querySelector(".historical-editor")?.getAttribute("aria-busy") || document.querySelector(".historical-editor")?.getAttribute("aria-busy") === "false", null, { timeout: 60000 });
   const editorRequests = [];
