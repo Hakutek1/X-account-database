@@ -229,6 +229,45 @@ try {
   await page.locator(".historical-grid-wrap").waitFor({ state: "visible", timeout: 60000 });
   await page.waitForFunction(() => !document.querySelector(".historical-editor")?.getAttribute("aria-busy") || document.querySelector(".historical-editor")?.getAttribute("aria-busy") === "false", null, { timeout: 60000 });
   const editorRequests = [];
+  const cells = page.locator(".historical-number-input");
+  const first = cells.nth(0), second = cells.nth(1);
+  const originals = [await first.inputValue(), await second.inputValue()];
+  await first.click();
+  assert.equal(await first.getAttribute("readonly"), "");
+  await second.click({modifiers:["Shift"]});
+  assert.equal(await page.locator("td.grid-selected").count(),2);
+  const copied = await first.evaluate(input => {
+    const data = new DataTransfer();
+    input.dispatchEvent(new ClipboardEvent("copy",{bubbles:true,cancelable:true,clipboardData:data}));
+    return data.getData("text/plain");
+  });
+  assert.equal(copied,originals.join("\t"));
+  await second.press("Backspace");
+  assert.equal(await first.inputValue(),"");
+  assert.equal(await second.inputValue(),"");
+  const paste = async text => first.evaluate((input,text) => {
+    const data = new DataTransfer(); data.setData("text/plain",text);
+    input.dispatchEvent(new ClipboardEvent("paste",{bubbles:true,cancelable:true,clipboardData:data}));
+  },text);
+  await paste("12\t34");
+  assert.equal(await first.inputValue(),"12");
+  assert.equal(await second.inputValue(),"34");
+  await paste("99\tinvalid");
+  assert.equal(await first.inputValue(),"12","invalid paste must be atomic");
+  assert.equal(await second.inputValue(),"34");
+  await paste(Array(loaded.body.dates.length + 1).fill("1").join("\t"));
+  assert.equal(await first.inputValue(),"12","out-of-range paste must be rejected");
+  await paste(originals.join("\t"));
+  await first.dblclick();
+  assert.equal(await first.getAttribute("readonly"),null);
+  await first.fill(originals[0]);
+  await first.press("Enter");
+  await second.click();
+  await second.press("F2");
+  assert.equal(await second.getAttribute("readonly"),null);
+  await second.fill(originals[1]);
+  await second.press("Enter");
+
   page.on("request", (request) => {
     if (request.url().includes("/api/admin/historical-data")) editorRequests.push(request.method());
   });

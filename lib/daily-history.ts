@@ -232,13 +232,15 @@ type ExistingPostRecord = {
  */
 export async function ensureDailyPostsThroughToday(database: D1Database, sessionId: string, today = dateParts(new Date().toISOString())) {
   if (!today) return;
-  const [daily, snapshots, openingDates, existing, freezeDateByAccount] = await Promise.all([
+  const [daily, snapshots, openingDates, existing, freezeDateByAccount, suspendedAccounts] = await Promise.all([
     database.prepare("SELECT date, account_id, handle, display_name, posts, fetched_at, origin FROM xstats_daily_history WHERE session_id = ? AND posts IS NOT NULL AND date <= ?").bind(sessionId, today).all<{ date: string; account_id: string; handle: string; display_name: string; posts: number; fetched_at: string; origin: string }>(),
     database.prepare("SELECT account_id, handle, display_name, posts, fetched_at FROM xstats_snapshots WHERE session_id = ? AND posts IS NOT NULL").bind(sessionId).all<{ account_id: string; handle: string; display_name: string; posts: number; fetched_at: string }>(),
     database.prepare("SELECT account_id, joined_at FROM xstats_account_statuses WHERE session_id = ? AND joined_at IS NOT NULL").bind(sessionId).all<{ account_id: string; joined_at: string }>(),
     database.prepare("SELECT account_id, date, posts, origin FROM xstats_daily_history WHERE session_id = ? AND date <= ?").bind(sessionId, today).all<ExistingPostRecord>(),
     loadAccountFreezeDateMap(database, sessionId),
+    database.prepare("SELECT account_id FROM xstats_account_statuses WHERE session_id = ? AND status = 'suspended'").bind(sessionId).all<{account_id:string}>(),
   ]);
+  const suspendedIds = new Set(suspendedAccounts.results.map(row => row.account_id));
   const latestByAccount = new Map<string, LatestPostRecord>();
   const recordedPostsByAccount = new Map<string, LatestPostRecord[]>();
   const consider = (candidate: LatestPostRecord) => {
@@ -264,7 +266,7 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
   const openingDateByAccount = new Map(openingDates.results.map((row) => [row.account_id, jstCalendarDate(row.joined_at)] as const));
   const staleCarryForwardKeys = new Set<string>();
   for (const row of existing.results) {
-    if (row.origin !== "carry-forward" || freezeDateByAccount.get(row.account_id)) continue;
+    if (row.origin !== "carry-forward" || suspendedIds.has(row.account_id) || freezeDateByAccount.get(row.account_id)) continue;
     const openingDate = openingDateByAccount.get(row.account_id);
     if (!openingDate || row.date <= openingDate) continue;
     const expected = (recordedPostsByAccount.get(row.account_id) ?? [])
@@ -283,6 +285,7 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
   const statements: D1PreparedStatement[] = [];
   const now = new Date().toISOString();
   for (const source of latestByAccount.values()) {
+    if (suspendedIds.has(source.accountId)) continue;
     const freezeDate = freezeDateByAccount.get(source.accountId);
     const lastCarryForwardDate = freezeDate && freezeDate < today ? freezeDate : today;
     for (let date = addCalendarDays(source.date, 1); date <= lastCarryForwardDate; date = addCalendarDays(date, 1)) {
