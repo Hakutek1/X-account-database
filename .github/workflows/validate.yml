@@ -111,9 +111,9 @@ jobs:
           SQL
           npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-before-freeze.jsonc" --persist-to "$persist" --file "$RUNNER_TEMP/freeze-seed.sql"
           npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-after-freeze.jsonc" --persist-to "$persist"
-          output="$(npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-after-freeze.jsonc" --persist-to "$persist" --command "SELECT 'freeze_column:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_account_statuses') WHERE name='freeze_date') || '|status:' || COALESCE((SELECT status || ':' || joined_at || ':' || COALESCE(freeze_date, 'NULL') FROM xstats_account_statuses WHERE session_id='freeze-migration-test' AND account_id='kept-account'), 'missing') || '|history:' || (SELECT COUNT(*) FROM xstats_daily_history WHERE id='kept-history' AND followers=100 AND posts=5) || '|targets:' || COALESCE((SELECT handles_json || ':' || revision FROM xstats_account_targets WHERE session_id='freeze-migration-test'), 'missing') AS result")"
+          output="$(npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-after-freeze.jsonc" --persist-to "$persist" --command "SELECT 'freeze_column:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_account_statuses') WHERE name='freeze_date') || '|status:' || COALESCE((SELECT status || ':' || joined_at || ':' || COALESCE(freeze_date, 'NULL') FROM xstats_account_statuses WHERE session_id='freeze-migration-test' AND account_id='kept-account'), 'missing') || '|history:' || (SELECT COUNT(*) FROM xstats_daily_history WHERE id='kept-history' AND followers=100 AND posts=5) || '|targets:' || (SELECT COUNT(*) FROM xstats_account_targets WHERE session_id='freeze-migration-test' AND json_extract(handles_json, '$[0]')='kept' AND revision=2 AND initialized=1) AS result")"
           printf '%s\n' "$output"
-          for expected in 'freeze_column:1' 'status:suspended:2020-01-02:NULL' 'history:1' 'targets:["kept"]:2'; do
+          for expected in 'freeze_column:1' 'status:suspended:2020-01-02:NULL' 'history:1' 'targets:1'; do
             printf '%s' "$output" | grep -F "$expected" >/dev/null || { echo "Missing freeze-date migration result: $expected"; exit 1; }
           done
       - name: Build and run the complete test suite
