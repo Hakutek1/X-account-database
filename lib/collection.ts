@@ -1,7 +1,8 @@
 import { MAX_ACCOUNTS, fetchProfiles } from "./x-stats";
 import { pruneSessionHistory } from "../app/api/_shared";
-import { ensureAccountJoinedDates, ensureAccountStatuses } from "./account-status";
-import { ensureDailyPostsThroughToday, ensureOpeningDateHistory } from "./daily-history";
+import { ensureAccountJoinedDates, ensureAccountStatuses, loadAccountFreezeDateMap } from "./account-status";
+import { shouldUnfreezeAfterCollection } from "./freeze-date.ts";
+import { dailyRecordDate, ensureDailyPostsThroughToday, ensureOpeningDateHistory } from "./daily-history";
 
 export type CollectionResult = Awaited<ReturnType<typeof collectForSession>>;
 
@@ -22,8 +23,15 @@ export async function collectForSession({ db, sessionId, handles, sourceSummary,
   await db.batch(statements);
   await ensureAccountStatuses(db, sessionId, results.map((result) => result.id), fetchedAt);
   await ensureAccountJoinedDates(db, sessionId, results.map((result) => ({ accountId: result.id, joined: result.joined })), fetchedAt);
+  const collectionDate = dailyRecordDate(fetchedAt);
+  const freezeDates = await loadAccountFreezeDateMap(db, sessionId);
+  const unfrozenAccounts = results.filter((result) => shouldUnfreezeAfterCollection(freezeDates.get(result.id), collectionDate));
+  if (unfrozenAccounts.length) {
+    const now = new Date().toISOString();
+    await db.batch(unfrozenAccounts.map((account) => db.prepare("UPDATE xstats_account_statuses SET status = 'active', freeze_date = NULL, updated_at = ? WHERE session_id = ? AND account_id = ? AND freeze_date IS NOT NULL").bind(now, sessionId, account.id)));
+  }
   await ensureOpeningDateHistory(db, sessionId);
   await ensureDailyPostsThroughToday(db, sessionId);
   await pruneSessionHistory(db, sessionId);
-  return { runId, fetchedAt, results, errors };
+  return { runId, fetchedAt, results, errors, unfrozenAccounts: unfrozenAccounts.map(({ id, handle, displayName }) => ({ id, handle, displayName })) };
 }

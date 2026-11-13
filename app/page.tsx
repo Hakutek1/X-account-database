@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { buildFreshWorkbook, FRESH_WORKBOOK_SHEETS } from "../lib/fresh-workbook";
 import { WORKBOOK_SHEETS } from "../lib/workbook-sheet-names";
 import { canonicalDailyFetchedAt, dailyRecordDate } from "../lib/daily-history";
+import { buildFrozenMetricIndex, frozenProjectionDate } from "../lib/freeze-date.ts";
 import { ACCOUNT_STATUS_LABELS, ACCOUNT_STATUSES, isAccountStatus, type AccountStatus } from "../lib/account-status";
 import HistoricalDataEditor from "./historical-data-editor";
 import ExternalAvatarImage from "./external-avatar-image";
@@ -15,6 +16,7 @@ import { filterChartPickerAccounts, getNextChartMarkIndex, getRovingTabIndex, gr
 import { addHandleTargets, formatHandleTargetsForClipboard, normalizeStoredHandleTargets, parseHandleTargetInput } from "../lib/account-targets";
 import { clearCachedDashboardAccountData, loadLocallySavedAccountTargets, loadPersistedAccountTargets, saveLocallySavedAccountTargets, savePersistedAccountTargets } from "../lib/account-target-persistence";
 import { copyTextToClipboard } from "../lib/copy-to-clipboard";
+import { normalizeStoredStatusFilter } from "../lib/status-filter";
 
 const MAX_ACCOUNTS = 500;
 const numberFormatter = new Intl.NumberFormat("ja-JP");
@@ -34,7 +36,7 @@ type DashboardTab = "results" | "chart" | "historical";
 type ResultsViewMode = "table" | "compact" | "top10";
 type TopMetric = "followers" | "followersDelta" | "following" | "followingDelta" | "posts" | "postsDelta" | "postsPerFollower";
 type ChartMetric = MetricKey | "followersDelta" | "followingDelta" | "postsDelta" | "postsPerFollower" | "followersCumulativeDelta";
-type StatusCategory = "active" | "ended" | "nonAlt";
+type StatusCategory = "active" | "ended" | "suspended" | "nonAlt";
 type Granularity = "day" | "week" | "month";
 type Theme = "light" | "dark";
 
@@ -50,6 +52,7 @@ type AccountRow = {
   fetchedAt: string;
   status: "ok" | "error";
   accountStatus: AccountStatus;
+  freezeDate?: string | null;
   error?: string;
 };
 
@@ -66,11 +69,12 @@ type HistoryRow = {
   avatar_url: string | null;
   account_status: AccountStatus;
   joined: string | null;
+  freeze_date: string | null;
 };
 
 type LatestCollection = { fetched_at: string; success_count: number; error_count: number };
 type HistoryResponse = { runs?: { id: string; fetched_at: string }[]; rows?: HistoryRow[]; latestCollection?: LatestCollection | null; registeredAccountCount?: number; error?: string };
-type CollectResponse = { rows?: AccountRow[]; warnings?: string[]; error?: string };
+type CollectResponse = { rows?: AccountRow[]; warnings?: string[]; unfrozenAccounts?: Array<{ id: string; handle: string; displayName: string }>; error?: string };
 type AdminStatus = { configured?: boolean; isAdmin?: boolean; readMode?: "private" | "public"; error?: string };
 type AccountTargetsResponse = { handles?: string[]; revision?: number; initialized?: boolean; changed?: boolean; conflict?: boolean; error?: string };
 type SiteVersionResponse = { version?: number; label?: string };
@@ -85,12 +89,11 @@ type ExportRow = {
   posts: number | null;
 };
 type PreviousMetrics = { followers: number | null; following: number | null; posts: number | null };
-type PersistedDashboardState = { rows?: AccountRow[]; selectedHandles?: string[]; statusFilter?: StatusCategory[]; chartStatusFilter?: AccountStatus[]; theme?: Theme; displayNameOverrides?: Record<string, string>; legendColors?: Record<string, string>; barColor?: string; chartTitle?: string; chartTitleFontSize?: number; trendLineWidth?: number; markerSize?: number; markerOutlineWidth?: number; markerOutlineColor?: string; trendValueFontSize?: number; trendAxisFontSize?: number; trendDateFontSize?: number; trendValueLabelColor?: "series" | "black"; compareLabelFontSize?: number; showTrendLegend?: boolean; logScale?: boolean };
+type PersistedDashboardState = { rows?: AccountRow[]; selectedHandles?: string[]; statusFilter?: StatusCategory[]; statusFilterVersion?: number; chartStatusFilter?: AccountStatus[]; theme?: Theme; displayNameOverrides?: Record<string, string>; legendColors?: Record<string, string>; barColor?: string; chartTitle?: string; chartTitleFontSize?: number; trendLineWidth?: number; markerSize?: number; markerOutlineWidth?: number; markerOutlineColor?: string; trendValueFontSize?: number; trendAxisFontSize?: number; trendDateFontSize?: number; trendValueLabelColor?: "series" | "black"; compareLabelFontSize?: number; showTrendLegend?: boolean; logScale?: boolean };
 
 const NETWORK_RETRY_COUNT = 2;
 const NETWORK_RETRY_DELAY_MS = 700;
 const DASHBOARD_STORAGE_KEY = "x-account-stats-dashboard-v2";
-const LEGACY_BROWSER_EXCEL_DB = "x-account-stats-imports";
 const CHART_TITLE_TOP_PADDING = 20;
 const CHART_TITLE_GAP = 14;
 
@@ -265,6 +268,7 @@ function accountStatusLabel(value: AccountStatus | undefined) {
 
 function statusCategory(value: AccountStatus | undefined): StatusCategory {
   if (value === "active") return "active";
+  if (value === "suspended") return "suspended";
   if (value === "non_alt") return "nonAlt";
   return "ended";
 }
@@ -278,7 +282,7 @@ function StatusFilter({ selected, onChange }: { selected: readonly StatusCategor
     const next = selected.includes(category) ? selected.filter((value) => value !== category) : [...selected, category];
     onChange(next);
   };
-  return <div className="status-filter" role="group" aria-label="活動状態で絞り込み"><span>活動状態</span>{(["active", "ended", "nonAlt"] as StatusCategory[]).map((category) => <button key={category} type="button" className={selected.includes(category) ? "is-active" : ""} aria-pressed={selected.includes(category)} onClick={() => toggle(category)}>{category === "active" ? "活動中" : category === "nonAlt" ? "非複垢" : "活動終了"}</button>)}<button type="button" className={selected.length === 3 ? "is-active" : ""} aria-pressed={selected.length === 3} onClick={() => onChange(["active", "ended", "nonAlt"])}>全て</button></div>;
+  return <div className="status-filter" role="group" aria-label="活動状態で絞り込み"><span>活動状態</span>{(["active", "ended", "suspended", "nonAlt"] as StatusCategory[]).map((category) => <button key={category} type="button" className={selected.includes(category) ? "is-active" : ""} aria-pressed={selected.includes(category)} onClick={() => toggle(category)}>{category === "active" ? "活動中" : category === "ended" ? "活動終了" : category === "suspended" ? "凍結" : "非複垢"}</button>)}<button type="button" className={selected.length === 4 ? "is-active" : ""} aria-pressed={selected.length === 4} onClick={() => onChange(["active", "ended", "suspended", "nonAlt"])}>全て</button></div>;
 }
 
 function ChartStatusFilter({ selected, onChange }: { selected: readonly AccountStatus[]; onChange: (next: AccountStatus[]) => void }) {
@@ -409,8 +413,9 @@ function DeltaCell({ value }: { value: number | null | undefined }) {
   return <td className={`numeric-cell metric-delta-cell ${deltaClass(value)}`}><span className="metric-delta">{formatResultDelta(value)}</span></td>;
 }
 
-function AccountStatusBadge({ status }: { status: AccountStatus | undefined }) {
-  return <span className={`account-status-badge account-status-${status ?? "active"}`}>{accountStatusLabel(status)}</span>;
+function AccountStatusBadge({ status, freezeDate }: { status: AccountStatus | undefined; freezeDate?: string | null }) {
+  const label = status === "suspended" && freezeDate ? `凍結（${freezeDate}）` : accountStatusLabel(status);
+  return <span className={`account-status-badge account-status-${status ?? "active"}`}>{label}</span>;
 }
 
 function CalendarIcon() {
@@ -452,7 +457,7 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
           </tr></thead>
           <tbody>{rows.map((row) => (
             <tr key={row.id + "-" + row.handle} className={row.status === "error" ? "is-error" : ""}>
-              <td><div className="display-name-cell"><input className={`display-name-input ${displayNameEditMode ? "is-editing" : ""}`} readOnly={!displayNameEditMode} value={resolvedDisplayName(row, displayNameOverrides)} onChange={(event) => onDisplayNameChange(row, event.target.value)} aria-label={row.handle + "の表示名"} /><small>元の表示名：{row.displayName}</small><AccountStatusBadge status={row.accountStatus} /></div></td>
+              <td><div className="display-name-cell"><input className={`display-name-input ${displayNameEditMode ? "is-editing" : ""}`} readOnly={!displayNameEditMode} value={resolvedDisplayName(row, displayNameOverrides)} onChange={(event) => onDisplayNameChange(row, event.target.value)} aria-label={row.handle + "の表示名"} /><small>元の表示名：{row.displayName}</small><AccountStatusBadge status={row.accountStatus} freezeDate={row.freezeDate} /></div></td>
               <td>
                 {row.status === "ok" ? <a className="account-link" href={"https://x.com/" + encodeURIComponent(row.handle)} target="_blank" rel="noreferrer">
                   {row.avatarUrl ? <ExternalAvatarImage className="account-avatar" src={row.avatarUrl} /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
@@ -482,7 +487,7 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
                   {row.avatarUrl ? <ExternalAvatarImage className="account-avatar" src={row.avatarUrl} /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
                   <span className="handle-cell">@{row.handle}</span>
                 </a> : <span className="account-link account-link-disabled"><span className="account-avatar account-avatar-fallback" aria-hidden="true">?</span><span className="handle-cell">@{row.handle}</span></span>}
-                <AccountStatusBadge status={row.accountStatus} />
+                <AccountStatusBadge status={row.accountStatus} freezeDate={row.freezeDate} />
               </div>
               {row.status === "error" && <span className="status-pill status-error">失敗</span>}
             </div>
@@ -506,7 +511,7 @@ function CompactResults({ rows, previousByAccount, displayNameOverrides }: { row
     return <article className={`compact-result-card ${row.status === "error" ? "is-error" : ""}`} key={`${row.id}-${row.handle}`}>
       <div className="compact-account-cell"><a className="account-link" href={row.status === "ok" ? `https://x.com/${encodeURIComponent(row.handle)}` : undefined} target={row.status === "ok" ? "_blank" : undefined} rel={row.status === "ok" ? "noreferrer" : undefined}>
         {row.avatarUrl ? <ExternalAvatarImage className="account-avatar" src={row.avatarUrl} /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
-        <span className="compact-account-copy"><strong className="handle-cell">{displayName}</strong><small>@{row.handle}</small><AccountStatusBadge status={row.accountStatus} /></span>
+        <span className="compact-account-copy"><strong className="handle-cell">{displayName}</strong><small>@{row.handle}</small><AccountStatusBadge status={row.accountStatus} freezeDate={row.freezeDate} /></span>
       </a></div>
       {row.status === "ok" ? <><div className="compact-value-cell"><small>フォロワー</small><strong>{formatResultNumber(row.followers)}</strong><em className={deltaClass(previousByAccount.get(row.id)?.followers)}>{formatResultDelta(previousByAccount.get(row.id)?.followers)}</em></div><div className="compact-value-cell"><small>フォロー</small><strong>{formatResultNumber(row.following)}</strong></div><div className="compact-value-cell"><small>投稿</small><strong>{formatResultNumber(row.posts)}</strong><em className={deltaClass(previousByAccount.get(row.id)?.posts)}>{formatResultDelta(previousByAccount.get(row.id)?.posts)}</em></div></> : <p className="compact-error-copy">{row.error ?? "取得できませんでした"}</p>}
     </article>;
@@ -620,7 +625,7 @@ function TopResults({ rows, topMetric, onTopMetricChange, previousByAccount, dis
     {topRows.length ? <><div className="top15-grid">{topRows.map((row, index) => {
       const value = topMetricValue(row, topMetric, previousByAccount);
       const displayName = resolvedDisplayName(row, displayNameOverrides);
-      return <article className={`top15-card top15-rank-${index + 1}`} key={row.id}><span className="top15-rank">{String(index + 1).padStart(2, "0")}</span><a href={`https://x.com/${encodeURIComponent(row.handle)}`} target="_blank" rel="noreferrer" className="top15-account" aria-label={`${displayName} @${row.handle}`}>{row.avatarUrl ? <ExternalAvatarImage className="top15-avatar" src={row.avatarUrl} /> : <span className="top15-avatar top15-avatar-fallback">{row.handle.slice(0, 1).toUpperCase()}</span>}<span><strong>{displayName}</strong></span></a><strong className={`top15-value ${value !== null && value < 0 ? "is-negative" : ""}`}>{formatTopMetricValue(row, topMetric, previousByAccount)}</strong></article>;
+      return <article className={`top15-card top15-rank-${index + 1}`} key={row.id}><span className="top15-rank">{String(index + 1).padStart(2, "0")}</span><a href={`https://x.com/${encodeURIComponent(row.handle)}`} target="_blank" rel="noreferrer" className="top15-account" aria-label={`${displayName} @${row.handle}`}>{row.avatarUrl ? <ExternalAvatarImage className="top15-avatar" src={row.avatarUrl} /> : <span className="top15-avatar top15-avatar-fallback">{row.handle.slice(0, 1).toUpperCase()}</span>}<span><strong>{displayName}</strong><AccountStatusBadge status={row.accountStatus} freezeDate={row.freezeDate} /></span></a><strong className={`top15-value ${value !== null && value < 0 ? "is-negative" : ""}`}>{formatTopMetricValue(row, topMetric, previousByAccount)}</strong></article>;
     })}</div>{expanded && extraRows.length > 0 && <div className="top15-expanded-grid">{extraRows.map((row, extraIndex) => { const rank = extraIndex + 16; const displayName = resolvedDisplayName(row, displayNameOverrides); const value = topMetricValue(row, topMetric, previousByAccount); return <article className="top15-card" key={row.id}><span className="top15-rank">{String(rank).padStart(2, "0")}</span><a href={`https://x.com/${encodeURIComponent(row.handle)}`} target="_blank" rel="noreferrer" className="top15-account" aria-label={`${displayName} @${row.handle}`}>{row.avatarUrl ? <ExternalAvatarImage className="top15-avatar" src={row.avatarUrl} /> : <span className="top15-avatar top15-avatar-fallback">{row.handle.slice(0, 1).toUpperCase()}</span>}<span><strong>{displayName}</strong></span></a><strong className={`top15-value ${value !== null && value < 0 ? "is-negative" : ""}`}>{formatTopMetricValue(row, topMetric, previousByAccount)}</strong></article>; })}</div>}{extraRows.length > 0 && <button type="button" className="secondary-button top15-expand-button" onClick={onToggleExpanded}>{expanded ? "16位以下を非表示" : "16位以下を表示"}</button>}</> : <div className="empty-table">{!hasRowsForDate ? (selectedDate ? `${selectedDate}はデータがないため表示できません。` : "ランキングを表示できる取得データがありません。") : isTopDeltaMetric(topMetric) ? `${selectedDate}は比較対象のデータがありません。` : `${selectedDate}は表示できる数値がありません。`}</div>}
     {(Object.keys(topMetricLabels) as TopMetric[]).filter((item) => item !== topMetric).map((item) => <div key={item} id={"ranking-metric-panel-" + item} role="tabpanel" aria-labelledby={"ranking-metric-tab-" + item} hidden />)}
     </div>
@@ -656,6 +661,7 @@ function buildDailyChartRows(rows: HistoryRow[]) {
     avatarUrl: string | null;
     accountStatus: AccountStatus;
     joined: string | null;
+    freezeDate: string | null;
     latestFetchedAt: number;
     values: Record<MetricKey, Candidate | null>;
   };
@@ -675,6 +681,7 @@ function buildDailyChartRows(rows: HistoryRow[]) {
       avatarUrl: row.avatar_url,
       accountStatus: row.account_status,
       joined: row.joined,
+      freezeDate: row.freeze_date,
       latestFetchedAt: -Infinity,
       values: { followers: null, following: null, posts: null },
     };
@@ -690,6 +697,7 @@ function buildDailyChartRows(rows: HistoryRow[]) {
       aggregate.avatarUrl = row.avatar_url;
       aggregate.accountStatus = row.account_status;
       aggregate.joined = row.joined;
+      aggregate.freezeDate = row.freeze_date;
       aggregate.latestFetchedAt = fetchedAt;
     }
     aggregates.set(key, aggregate);
@@ -709,6 +717,7 @@ function buildDailyChartRows(rows: HistoryRow[]) {
       avatar_url: row.avatarUrl,
       account_status: row.accountStatus,
       joined: row.joined,
+      freeze_date: row.freezeDate,
     }))
     .sort((left, right) => left.fetched_at.localeCompare(right.fetched_at) || left.handle.localeCompare(right.handle, "ja"));
 }
@@ -1436,7 +1445,7 @@ export default function Home() {
       if (latestHistoricalRows.length) {
         setRows((current) => latestHistoricalRows.map((row) => {
             const previous = current.find((item) => item.id === row.account_id || item.handle.toLowerCase() === row.handle.toLowerCase());
-            return { id: row.account_id, handle: row.handle, displayName: row.display_name, avatarUrl: row.avatar_url ?? previous?.avatarUrl ?? null, followers: row.followers, following: row.following, posts: row.posts, joined: row.joined ?? previous?.joined ?? null, fetchedAt: row.fetched_at, status: "ok" as const, accountStatus: row.account_status ?? previous?.accountStatus ?? "active" };
+            return { id: row.account_id, handle: row.handle, displayName: row.display_name, avatarUrl: row.avatar_url ?? previous?.avatarUrl ?? null, followers: row.followers, following: row.following, posts: row.posts, joined: row.joined ?? previous?.joined ?? null, fetchedAt: row.fetched_at, status: "ok" as const, accountStatus: row.account_status ?? previous?.accountStatus ?? "active", freezeDate: row.freeze_date ?? previous?.freezeDate ?? null };
           }));
       } else {
         setRows([]);
@@ -1492,7 +1501,8 @@ export default function Home() {
           setSelectedHandles(parsed.selectedHandles.filter((handle): handle is string => typeof handle === "string").map((handle) => handle.toLowerCase()));
         }
         if (Array.isArray(parsed.chartStatusFilter)) setChartStatusFilter(parsed.chartStatusFilter.filter((value): value is AccountStatus => isAccountStatus(value)));
-        if (Array.isArray(parsed.statusFilter)) setStatusFilter(parsed.statusFilter.filter((value): value is StatusCategory => value === "active" || value === "ended" || value === "nonAlt"));
+        const savedStatusFilter = normalizeStoredStatusFilter(parsed.statusFilter, parsed.statusFilterVersion);
+        if (savedStatusFilter) setStatusFilter(savedStatusFilter);
         if (parsed.theme === "light" || parsed.theme === "dark") setTheme(parsed.theme);
         if (canReadAccountData && parsed.displayNameOverrides && typeof parsed.displayNameOverrides === "object") setDisplayNameOverrides(parsed.displayNameOverrides);
         if (canReadAccountData && parsed.legendColors && typeof parsed.legendColors === "object") setLegendColors(parsed.legendColors);
@@ -1524,7 +1534,7 @@ export default function Home() {
     if (!isHydrated || !isReadAccessReady) return;
     const canReadAccountData = readMode === "public" || isAdmin;
     try {
-      const state: PersistedDashboardState = { ...(canReadAccountData ? { selectedHandles, displayNameOverrides, legendColors } : {}), statusFilter, chartStatusFilter, theme, barColor: barColor ?? undefined, chartTitle, chartTitleFontSize, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, showTrendLegend, logScale };
+      const state: PersistedDashboardState = { ...(canReadAccountData ? { selectedHandles, displayNameOverrides, legendColors } : {}), statusFilter, statusFilterVersion: 2, chartStatusFilter, theme, barColor: barColor ?? undefined, chartTitle, chartTitleFontSize, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, showTrendLegend, logScale };
       window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(state));
     } catch {
       // A full or restricted localStorage should not block data collection.
@@ -1559,17 +1569,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    // The former browser-only Excel supplement is no longer a data source.
-    // Remove its IndexedDB store once so old workbook bytes cannot remain in
-    // this browser after the D1 migration.
-    try {
-      window.indexedDB?.deleteDatabase(LEGACY_BROWSER_EXCEL_DB);
-    } catch {
-      // IndexedDB may be unavailable in private or restricted browser modes.
-    }
-  }, []);
-
-  useEffect(() => {
     const timer = window.setTimeout(() => { void loadAdminStatus(); }, 0);
     return () => window.clearTimeout(timer);
     // The admin cookie is checked once when the public dashboard opens.
@@ -1592,11 +1591,22 @@ export default function Home() {
   const chartHistoryRows = useMemo(() => {
     return buildDailyChartRows(historyRows);
   }, [historyRows]);
+  const frozenMetricIndex = useMemo(() => buildFrozenMetricIndex(chartHistoryRows, (row) => {
+    const parts = chartDateParts(row.fetched_at);
+    return parts ? parts.year + "-" + parts.month + "-" + parts.day : null;
+  }), [chartHistoryRows]);
   const topMetricField = topMetricBase(topMetric);
   const topAvailableDates = useMemo(() => {
-    if (topMetric !== "postsPerFollower") return availableHistoryDates(chartHistoryRows, topMetricField, statusFilter);
-    return [...new Set(chartHistoryRows.filter((row) => matchesStatusFilter(row.account_status, statusFilter) && row.followers !== null && row.followers > 0 && row.posts !== null && row.posts !== undefined && row.posts > 0).map((row) => chartDateParts(row.fetched_at)).filter((parts): parts is { year: string; month: string; day: string } => Boolean(parts)).map((parts) => `${parts.year}-${parts.month}-${parts.day}`))].sort();
-  }, [chartHistoryRows, statusFilter, topMetric, topMetricField]);
+    const historyDates = topMetric !== "postsPerFollower"
+      ? availableHistoryDates(chartHistoryRows, topMetricField, statusFilter)
+      : [...new Set(chartHistoryRows.filter((row) => matchesStatusFilter(row.account_status, statusFilter) && row.followers !== null && row.followers > 0 && row.posts !== null && row.posts !== undefined && row.posts > 0).map((row) => chartDateParts(row.fetched_at)).filter((parts): parts is { year: string; month: string; day: string } => Boolean(parts)).map((parts) => parts.year + "-" + parts.month + "-" + parts.day))];
+    const frozenDates = [...frozenMetricIndex.values()]
+      .filter((entry) => matchesStatusFilter("suspended", statusFilter) && (topMetric === "postsPerFollower"
+        ? (entry.atFreeze.followers?.value ?? 0) > 0 && (entry.atFreeze.posts?.value ?? 0) > 0
+        : entry.atFreeze[topMetricField] !== null))
+      .map((entry) => entry.freezeDate);
+    return [...new Set([...historyDates, ...frozenDates])].sort();
+  }, [chartHistoryRows, frozenMetricIndex, statusFilter, topMetric, topMetricField]);
   const topDateMin = topAvailableDates[0] ?? "";
   const topDateMax = topAvailableDates.at(-1) ?? "";
   const selectedTopDate = topDate && topDateMin && topDateMax && topDate >= topDateMin && topDate <= topDateMax ? topDate : topDateMax;
@@ -1604,10 +1614,23 @@ export default function Home() {
     const latestByHandle = new Map<string, HistoryRow>();
     for (const row of chartHistoryRows) {
       const parts = chartDateParts(row.fetched_at);
-      if (!parts || `${parts.year}-${parts.month}-${parts.day}` !== selectedTopDate) continue;
+      if (!parts || parts.year + "-" + parts.month + "-" + parts.day !== selectedTopDate) continue;
       const handle = row.handle.toLowerCase();
       const current = latestByHandle.get(handle);
       if (!current || new Date(row.fetched_at).getTime() > new Date(current.fetched_at).getTime()) latestByHandle.set(handle, row);
+    }
+    for (const entry of frozenMetricIndex.values()) {
+      if (!selectedTopDate || frozenProjectionDate(selectedTopDate, entry.freezeDate) !== entry.freezeDate || !entry.latestRow) continue;
+      const source = entry.latestRow;
+      latestByHandle.set(source.handle.toLowerCase(), {
+        ...source,
+        fetched_at: canonicalDailyFetchedAt(selectedTopDate),
+        followers: entry.atFreeze.followers?.value ?? null,
+        following: entry.atFreeze.following?.value ?? null,
+        posts: entry.atFreeze.posts?.value ?? null,
+        account_status: "suspended",
+        freeze_date: entry.freezeDate,
+      });
     }
     const currentMeta = new Map(successfulRows.map((row) => [row.handle.toLowerCase(), row]));
     return [...latestByHandle.values()].map((row) => {
@@ -1624,9 +1647,10 @@ export default function Home() {
         fetchedAt: row.fetched_at,
         status: "ok" as const,
         accountStatus: row.account_status,
+        freezeDate: row.freeze_date,
       };
     });
-  }, [chartHistoryRows, selectedTopDate, successfulRows]);
+  }, [chartHistoryRows, frozenMetricIndex, selectedTopDate, successfulRows]);
   const topComparisonTargetDate = useMemo(() => {
     if (!selectedTopDate) return "";
     const candidates = topAvailableDates.filter((date) => date < selectedTopDate);
@@ -1637,7 +1661,7 @@ export default function Home() {
     const previousByHandle = new Map<string, HistoryRow>();
     for (const row of chartHistoryRows) {
       const parts = chartDateParts(row.fetched_at);
-      if (!parts || `${parts.year}-${parts.month}-${parts.day}` !== previousDate) continue;
+      if (!parts || parts.year + "-" + parts.month + "-" + parts.day !== previousDate) continue;
       const handle = row.handle.toLowerCase();
       const current = previousByHandle.get(handle);
       if (!current || new Date(row.fetched_at).getTime() > new Date(current.fetched_at).getTime()) previousByHandle.set(handle, row);
@@ -1645,15 +1669,26 @@ export default function Home() {
     const result = new Map<string, PreviousMetrics>();
     for (const row of topDateRows) {
       const previous = previousByHandle.get(row.handle.toLowerCase());
+      const frozen = frozenMetricIndex.get(row.id);
+      const useFreezeBaseline = Boolean(frozen && selectedTopDate >= frozen.freezeDate);
+      const previousFollowers = useFreezeBaseline ? frozen?.beforeFreeze.followers?.value : previous?.followers;
+      const previousFollowing = useFreezeBaseline ? frozen?.beforeFreeze.following?.value : previous?.following;
+      const previousPosts = useFreezeBaseline ? frozen?.beforeFreeze.posts?.value : previous?.posts;
       result.set(row.id, {
-        followers: row.followers !== null && previous?.followers !== null && previous?.followers !== undefined ? row.followers - previous.followers : null,
-        following: row.following !== null && previous?.following !== null && previous?.following !== undefined ? row.following - previous.following : null,
-        posts: row.posts !== null && previous?.posts !== null && previous?.posts !== undefined ? row.posts - previous.posts : null,
+        followers: row.followers !== null && previousFollowers !== null && previousFollowers !== undefined ? row.followers - previousFollowers : null,
+        following: row.following !== null && previousFollowing !== null && previousFollowing !== undefined ? row.following - previousFollowing : null,
+        posts: row.posts !== null && previousPosts !== null && previousPosts !== undefined ? row.posts - previousPosts : null,
       });
     }
     return result;
-  }, [chartHistoryRows, topComparisonTargetDate, topDateRows]);
-  const resultAvailableDates = useMemo(() => availableHistoryDates(chartHistoryRows, "any", statusFilter), [chartHistoryRows, statusFilter]);
+  }, [chartHistoryRows, frozenMetricIndex, selectedTopDate, topComparisonTargetDate, topDateRows]);
+  const resultAvailableDates = useMemo(() => {
+    const historyDates = availableHistoryDates(chartHistoryRows, "any", statusFilter);
+    const frozenDates = [...frozenMetricIndex.values()]
+      .filter((entry) => matchesStatusFilter("suspended", statusFilter) && Object.values(entry.atFreeze).some((value) => value !== null))
+      .map((entry) => entry.freezeDate);
+    return [...new Set([...historyDates, ...frozenDates])].sort();
+  }, [chartHistoryRows, frozenMetricIndex, statusFilter]);
   const resultDateMin = resultAvailableDates[0] ?? "";
   const resultDateMax = resultAvailableDates.at(-1) ?? "";
   const selectedResultDate = resultDate && resultDateMin && resultDateMax && resultDate >= resultDateMin && resultDate <= resultDateMax ? resultDate : resultDateMax;
@@ -1662,43 +1697,64 @@ export default function Home() {
     const historyByAccount = new Map<string, HistoryRow>();
     for (const row of chartHistoryRows) {
       const parts = chartDateParts(row.fetched_at);
-      if (!parts || `${parts.year}-${parts.month}-${parts.day}` !== selectedResultDate) continue;
-      const current = historyByAccount.get(row.account_id) ?? historyByAccount.get(`handle:${row.handle.toLowerCase()}`);
+      if (!parts || parts.year + "-" + parts.month + "-" + parts.day !== selectedResultDate) continue;
+      const current = historyByAccount.get(row.account_id) ?? historyByAccount.get("handle:" + row.handle.toLowerCase());
       if (!current || row.fetched_at > current.fetched_at) {
         historyByAccount.set(row.account_id, row);
-        historyByAccount.set(`handle:${row.handle.toLowerCase()}`, row);
+        historyByAccount.set("handle:" + row.handle.toLowerCase(), row);
       }
     }
     const accounts = new Map<string, AccountRow>();
     for (const row of successfulRows) accounts.set(row.id, { ...row, followers: null, following: null, posts: null, fetchedAt: canonicalDailyFetchedAt(selectedResultDate) });
     for (const row of chartHistoryRows) {
-      if (!accounts.has(row.account_id)) accounts.set(row.account_id, { id: row.account_id, handle: row.handle, displayName: row.display_name, avatarUrl: row.avatar_url, followers: null, following: null, posts: null, joined: null, fetchedAt: canonicalDailyFetchedAt(selectedResultDate), status: "ok", accountStatus: row.account_status });
+      if (!accounts.has(row.account_id)) accounts.set(row.account_id, { id: row.account_id, handle: row.handle, displayName: row.display_name, avatarUrl: row.avatar_url, followers: null, following: null, posts: null, joined: null, fetchedAt: canonicalDailyFetchedAt(selectedResultDate), status: "ok", accountStatus: row.account_status, freezeDate: row.freeze_date });
     }
     return [...accounts.values()].map((account) => {
-      const history = historyByAccount.get(account.id) ?? historyByAccount.get(`handle:${account.handle.toLowerCase()}`);
-      return history ? { ...account, handle: history.handle, displayName: history.display_name, avatarUrl: history.avatar_url ?? account.avatarUrl, followers: history.followers, following: history.following, posts: history.posts, fetchedAt: history.fetched_at, accountStatus: history.account_status } : account;
+      const history = historyByAccount.get(account.id) ?? historyByAccount.get("handle:" + account.handle.toLowerCase());
+      const frozen = frozenMetricIndex.get(account.id);
+      const projectionDate = frozenProjectionDate(selectedResultDate, frozen?.freezeDate);
+      if (frozen && projectionDate === frozen.freezeDate && frozen.latestRow) {
+        return {
+          ...account,
+          handle: frozen.latestRow.handle,
+          displayName: frozen.latestRow.display_name,
+          avatarUrl: frozen.latestRow.avatar_url ?? account.avatarUrl,
+          followers: frozen.atFreeze.followers?.value ?? null,
+          following: frozen.atFreeze.following?.value ?? null,
+          posts: frozen.atFreeze.posts?.value ?? null,
+          fetchedAt: canonicalDailyFetchedAt(frozen.freezeDate),
+          accountStatus: "suspended" as const,
+          freezeDate: frozen.freezeDate,
+        };
+      }
+      return history ? { ...account, handle: history.handle, displayName: history.display_name, avatarUrl: history.avatar_url ?? account.avatarUrl, followers: history.followers, following: history.following, posts: history.posts, fetchedAt: history.fetched_at, accountStatus: history.account_status, freezeDate: history.freeze_date } : account;
     });
-  }, [chartHistoryRows, selectedResultDate, successfulRows]);
+  }, [chartHistoryRows, frozenMetricIndex, selectedResultDate, successfulRows]);
   const resultPreviousByAccount = useMemo(() => {
     const previousDate = selectedResultDate ? shiftDateKey(selectedResultDate, -1) : "";
     const previousByAccount = new Map<string, HistoryRow>();
     for (const row of chartHistoryRows) {
       const parts = chartDateParts(row.fetched_at);
-      if (!parts || `${parts.year}-${parts.month}-${parts.day}` !== previousDate) continue;
+      if (!parts || parts.year + "-" + parts.month + "-" + parts.day !== previousDate) continue;
       const current = previousByAccount.get(row.account_id);
       if (!current || row.fetched_at > current.fetched_at) previousByAccount.set(row.account_id, row);
     }
     const result = new Map<string, PreviousMetrics>();
     for (const row of resultDateRows) {
       const previous = previousByAccount.get(row.id);
+      const frozen = frozenMetricIndex.get(row.id);
+      const useFreezeBaseline = Boolean(frozen && selectedResultDate >= frozen.freezeDate);
+      const previousFollowers = useFreezeBaseline ? frozen?.beforeFreeze.followers?.value : previous?.followers;
+      const previousFollowing = useFreezeBaseline ? frozen?.beforeFreeze.following?.value : previous?.following;
+      const previousPosts = useFreezeBaseline ? frozen?.beforeFreeze.posts?.value : previous?.posts;
       result.set(row.id, {
-        followers: row.followers !== null && previous?.followers !== null && previous?.followers !== undefined ? row.followers - previous.followers : null,
-        following: row.following !== null && previous?.following !== null && previous?.following !== undefined ? row.following - previous.following : null,
-        posts: row.posts !== null && previous?.posts !== null && previous?.posts !== undefined ? row.posts - previous.posts : null,
+        followers: row.followers !== null && previousFollowers !== null && previousFollowers !== undefined ? row.followers - previousFollowers : null,
+        following: row.following !== null && previousFollowing !== null && previousFollowing !== undefined ? row.following - previousFollowing : null,
+        posts: row.posts !== null && previousPosts !== null && previousPosts !== undefined ? row.posts - previousPosts : null,
       });
     }
     return result;
-  }, [chartHistoryRows, resultDateRows, selectedResultDate]);
+  }, [chartHistoryRows, frozenMetricIndex, resultDateRows, selectedResultDate]);
   const totals = useMemo(() => ({ followers: successfulRows.reduce((sum, row) => sum + (row.followers ?? 0), 0), following: successfulRows.reduce((sum, row) => sum + (row.following ?? 0), 0), posts: successfulRows.reduce((sum, row) => sum + (row.posts ?? 0), 0) }), [successfulRows]);
   const previousByAccount = useMemo(() => {
     const currentById = new Map(successfulRows.map((row) => [row.id, row]));
@@ -2086,7 +2142,10 @@ export default function Home() {
       });
       await loadHistory();
       const warnings = payload.warnings?.length ? ` ${payload.warnings.join(" ")}` : "";
-      setNotice({ tone: payload.rows?.some((row) => row.status === "error") ? "error" : "success", message: `${payload.rows?.filter((row) => row.status === "ok").length ?? 0}件のデータを取得しました。${warnings}` });
+      const unfrozenNotice = payload.unfrozenAccounts?.length
+        ? ` 凍結を解除しました: ${payload.unfrozenAccounts.map((account) => `@${account.handle}`).join("、")}`
+        : "";
+      setNotice({ tone: payload.rows?.some((row) => row.status === "error") ? "error" : "success", message: `${payload.rows?.filter((row) => row.status === "ok").length ?? 0}件のデータを取得しました。${unfrozenNotice}${warnings}` });
     } catch (error) {
       setNotice({ tone: "error", message: error instanceof Error ? error.message : "データ取得に失敗しました" });
     } finally {
@@ -2168,7 +2227,7 @@ export default function Home() {
     <main className="site-shell">
       <header className="topbar editorial-topbar">
         <svg className="brand-graph-decoration" viewBox="0 0 1200 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><g className="brand-graph-bars"><rect x="40" y="65" width="55" height="35" /><rect x="160" y="48" width="55" height="52" /><rect x="280" y="72" width="55" height="28" /><rect x="400" y="38" width="55" height="62" /><rect x="520" y="60" width="55" height="40" /><rect x="640" y="27" width="55" height="73" /><rect x="760" y="54" width="55" height="46" /><rect x="880" y="33" width="55" height="67" /><rect x="1000" y="46" width="55" height="54" /><rect x="1120" y="20" width="55" height="80" /></g><polyline className="brand-graph-line" points="0,76 110,58 230,69 350,32 470,50 590,21 710,42 830,17 950,36 1070,11 1200,25" /></svg>
-        <div className="brand editorial-brand"><div className="editorial-brand-copy"><p className="brand-name">複垢データベース</p></div></div>
+        <div className="brand editorial-brand"><div className="editorial-brand-copy"><p className="brand-name">複垢データベース</p><p className="brand-subtitle">FUKUAKA DATABASE</p></div></div>
         <div className="topbar-meta editorial-topbar-meta"><button className="theme-toggle editorial-theme-toggle" type="button" onClick={toggleTheme} aria-pressed={theme === "dark"} aria-label={theme === "dark" ? "ライトモードに切り替え" : "ダークモードに切り替え"}><span className="theme-toggle-icon"><ThemeIcon mode={theme} /></span><span className="theme-toggle-label">{theme === "dark" ? "ライト" : "ダーク"}</span></button></div>
       </header>
 

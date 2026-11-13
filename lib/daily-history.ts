@@ -1,5 +1,5 @@
 import { DAILY_HISTORY_SHEET_METRICS } from "./workbook-sheet-names.ts";
-import type { AccountStatus } from "./account-status.ts";
+import { loadAccountFreezeDateMap, type AccountStatus } from "./account-status.ts";
 
 export type DailyHistoryMetric = "followers" | "following" | "posts";
 
@@ -31,6 +31,7 @@ export type EffectiveHistoryRow = {
   avatar_url: string | null;
   account_status: AccountStatus;
   joined: string | null;
+  freeze_date: string | null;
 };
 
 export type DailyHistoryUpsertRow = {
@@ -109,11 +110,18 @@ type SnapshotForBackfill = {
 };
 
 async function migrateLegacyDailyBuckets(database: D1Database, sessionId: string, updatedAt: string) {
-  const legacy = await database.prepare(`SELECT id, session_id, date, account_id, handle, display_name, followers, following, posts
-    FROM xstats_daily_history WHERE session_id = ? AND origin = 'migration' ORDER BY date ASC`).bind(sessionId).all<DailyHistoryRow>();
+  const [legacy, freezeDateByAccount] = await Promise.all([
+    database.prepare(`SELECT id, session_id, date, account_id, handle, display_name, followers, following, posts
+      FROM xstats_daily_history WHERE session_id = ? AND origin = 'migration' ORDER BY date ASC`).bind(sessionId).all<DailyHistoryRow>(),
+    loadAccountFreezeDateMap(database, sessionId),
+  ]);
   const statements: D1PreparedStatement[] = [];
   for (const row of legacy.results) {
     const date = addCalendarDays(row.date, 1);
+    const freezeDate = freezeDateByAccount.get(row.account_id);
+    // Keep the existing legacy row intact when its migration would carry it
+    // beyond the account's freeze date.
+    if (freezeDate && date > freezeDate) continue;
     statements.push(database.prepare("DELETE FROM xstats_daily_history WHERE session_id = ? AND id = ?").bind(sessionId, row.id));
     statements.push(database.prepare(`INSERT OR IGNORE INTO xstats_daily_history
       (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at)
@@ -133,7 +141,10 @@ export async function ensureDailyHistory(database: D1Database, sessionId: string
   }
   if ((meta?.backfilled ?? 0) >= 2) return meta;
 
-  const source = await database.prepare("SELECT id, fetched_at, account_id, handle, display_name, followers, following, posts FROM xstats_snapshots WHERE session_id = ? ORDER BY fetched_at ASC").bind(sessionId).all<SnapshotForBackfill>();
+  const [source, freezeDateByAccount] = await Promise.all([
+    database.prepare("SELECT id, fetched_at, account_id, handle, display_name, followers, following, posts FROM xstats_snapshots WHERE session_id = ? ORDER BY fetched_at ASC").bind(sessionId).all<SnapshotForBackfill>(),
+    loadAccountFreezeDateMap(database, sessionId),
+  ]);
   const grouped = new Map<string, {
     date: string;
     accountId: string;
@@ -151,6 +162,8 @@ export async function ensureDailyHistory(database: D1Database, sessionId: string
   for (const row of source.results) {
     const date = dailyRecordDate(row.fetched_at);
     if (!date || date > DAILY_HISTORY_CUTOFF) continue;
+    const freezeDate = freezeDateByAccount.get(row.account_id);
+    if (freezeDate && date > freezeDate) continue;
     const key = `${row.account_id}|${date}`;
     const fetchedAt = new Date(row.fetched_at).getTime();
     const current = grouped.get(key) ?? {
@@ -219,16 +232,18 @@ type ExistingPostRecord = {
  */
 export async function ensureDailyPostsThroughToday(database: D1Database, sessionId: string, today = dateParts(new Date().toISOString())) {
   if (!today) return;
-  const [daily, snapshots, openingDates, existing] = await Promise.all([
+  const [daily, snapshots, openingDates, existing, freezeDateByAccount] = await Promise.all([
     database.prepare("SELECT date, account_id, handle, display_name, posts, fetched_at, origin FROM xstats_daily_history WHERE session_id = ? AND posts IS NOT NULL AND date <= ?").bind(sessionId, today).all<{ date: string; account_id: string; handle: string; display_name: string; posts: number; fetched_at: string; origin: string }>(),
     database.prepare("SELECT account_id, handle, display_name, posts, fetched_at FROM xstats_snapshots WHERE session_id = ? AND posts IS NOT NULL").bind(sessionId).all<{ account_id: string; handle: string; display_name: string; posts: number; fetched_at: string }>(),
     database.prepare("SELECT account_id, joined_at FROM xstats_account_statuses WHERE session_id = ? AND joined_at IS NOT NULL").bind(sessionId).all<{ account_id: string; joined_at: string }>(),
     database.prepare("SELECT account_id, date, posts, origin FROM xstats_daily_history WHERE session_id = ? AND date <= ?").bind(sessionId, today).all<ExistingPostRecord>(),
+    loadAccountFreezeDateMap(database, sessionId),
   ]);
   const latestByAccount = new Map<string, LatestPostRecord>();
   const recordedPostsByAccount = new Map<string, LatestPostRecord[]>();
   const consider = (candidate: LatestPostRecord) => {
-    if (candidate.date > today) return;
+    const freezeDate = freezeDateByAccount.get(candidate.accountId);
+    if (candidate.date > today || (freezeDate && candidate.date > freezeDate)) return;
     const current = latestByAccount.get(candidate.accountId);
     if (!current || candidate.date > current.date || (candidate.date === current.date && candidate.fetchedAt >= current.fetchedAt)) latestByAccount.set(candidate.accountId, candidate);
     const records = recordedPostsByAccount.get(candidate.accountId) ?? [];
@@ -249,7 +264,7 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
   const openingDateByAccount = new Map(openingDates.results.map((row) => [row.account_id, jstCalendarDate(row.joined_at)] as const));
   const staleCarryForwardKeys = new Set<string>();
   for (const row of existing.results) {
-    if (row.origin !== "carry-forward") continue;
+    if (row.origin !== "carry-forward" || freezeDateByAccount.get(row.account_id)) continue;
     const openingDate = openingDateByAccount.get(row.account_id);
     if (!openingDate || row.date <= openingDate) continue;
     const expected = (recordedPostsByAccount.get(row.account_id) ?? [])
@@ -268,7 +283,9 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
   const statements: D1PreparedStatement[] = [];
   const now = new Date().toISOString();
   for (const source of latestByAccount.values()) {
-    for (let date = addCalendarDays(source.date, 1); date <= today; date = addCalendarDays(date, 1)) {
+    const freezeDate = freezeDateByAccount.get(source.accountId);
+    const lastCarryForwardDate = freezeDate && freezeDate < today ? freezeDate : today;
+    for (let date = addCalendarDays(source.date, 1); date <= lastCarryForwardDate; date = addCalendarDays(date, 1)) {
       const key = source.accountId + "|" + date;
       if (existingByKey.has(key) && existingByKey.get(key) !== null) continue;
       statements.push(database.prepare("INSERT INTO xstats_daily_history (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'carry-forward', ?) ON CONFLICT(session_id, account_id, date) DO UPDATE SET posts = COALESCE(xstats_daily_history.posts, excluded.posts), handle = excluded.handle, display_name = excluded.display_name, updated_at = excluded.updated_at").bind(stableDailyHistoryId(source.accountId, date), sessionId, date, source.accountId, source.handle, source.displayName, source.posts, canonicalDailyFetchedAt(date), now));
@@ -284,6 +301,7 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
 type OpeningDateAccount = {
   account_id: string;
   joined_at: string;
+  freeze_date?: string | null;
 };
 
 type OpeningDateIdentity = {
@@ -310,7 +328,7 @@ type OpeningDateSnapshot = OpeningDateIdentity & {
 export async function ensureOpeningDateHistory(database: D1Database, sessionId: string, today = dateParts(new Date().toISOString())) {
   if (!today) return 0;
   const [openingDates, identities, dailyRows, snapshots] = await Promise.all([
-    database.prepare("SELECT account_id, joined_at FROM xstats_account_statuses WHERE session_id = ? AND joined_at IS NOT NULL").bind(sessionId).all<OpeningDateAccount>(),
+    database.prepare("SELECT account_id, joined_at, freeze_date FROM xstats_account_statuses WHERE session_id = ? AND joined_at IS NOT NULL").bind(sessionId).all<OpeningDateAccount>(),
     database.prepare(`SELECT account_id, handle, display_name FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id
       UNION SELECT account_id, handle, display_name FROM xstats_daily_history WHERE session_id = ? GROUP BY account_id`).bind(sessionId, sessionId).all<OpeningDateIdentity>(),
     database.prepare("SELECT account_id, date, handle, display_name, followers, following, posts FROM xstats_daily_history WHERE session_id = ?").bind(sessionId).all<OpeningDateDaily>(),
@@ -333,6 +351,7 @@ export async function ensureOpeningDateHistory(database: D1Database, sessionId: 
   for (const account of openingDates.results) {
     const openingDate = jstCalendarDate(account.joined_at);
     if (!openingDate || openingDate > today) continue;
+    if (account.freeze_date && openingDate > account.freeze_date) continue;
     const key = `${account.account_id}|${openingDate}`;
     const existing = dailyByKey.get(key);
     const raw = rawByKey.get(key);
@@ -430,6 +449,7 @@ type RawSnapshot = {
   avatar_url: string | null;
   account_status: AccountStatus;
   joined: string | null;
+  freeze_date: string | null;
 };
 
 export async function loadEffectiveHistory(database: D1Database, sessionId: string) {
@@ -439,23 +459,25 @@ export async function loadEffectiveHistory(database: D1Database, sessionId: stri
   const snapshotColumns = await database.prepare('PRAGMA table_info("xstats_snapshots")').all<{ name: string }>();
   const hasSnapshotAvatarUrl = snapshotColumns.results.some((column) => column.name === "avatar_url");
   const snapshotAvatarUrl = hasSnapshotAvatarUrl ? "snapshots.avatar_url" : "NULL";
+  const statusColumns = await database.prepare('PRAGMA table_info("xstats_account_statuses")').all<{ name: string }>();
+  const freezeDateColumn = statusColumns.results.some((column) => column.name === "freeze_date") ? "statuses.freeze_date" : "NULL";
 
   const [raw, daily] = await Promise.all([
     database.prepare(`SELECT snapshots.id, snapshots.run_id, snapshots.fetched_at, snapshots.account_id, snapshots.handle, snapshots.display_name,
       snapshots.followers, snapshots.following, snapshots.posts, COALESCE(assets.avatar_url, ${snapshotAvatarUrl}) AS avatar_url,
-      COALESCE(statuses.status, 'active') AS account_status, statuses.joined_at AS joined
+      COALESCE(statuses.status, 'active') AS account_status, statuses.joined_at AS joined, ${freezeDateColumn} AS freeze_date
       FROM xstats_snapshots AS snapshots LEFT JOIN xstats_account_assets AS assets
       ON assets.session_id = snapshots.session_id AND assets.account_id = snapshots.account_id
       LEFT JOIN xstats_account_statuses AS statuses
       ON statuses.session_id = snapshots.session_id AND statuses.account_id = snapshots.account_id
       WHERE snapshots.session_id = ? ORDER BY snapshots.fetched_at ASC, snapshots.handle ASC`).bind(sessionId).all<RawSnapshot>(),
     database.prepare(`SELECT daily.id, daily.date, daily.account_id, daily.handle, daily.display_name, daily.followers, daily.following, daily.posts,
-      daily.fetched_at, assets.avatar_url AS avatar_url, COALESCE(statuses.status, 'active') AS account_status, statuses.joined_at AS joined
+      daily.fetched_at, assets.avatar_url AS avatar_url, COALESCE(statuses.status, 'active') AS account_status, statuses.joined_at AS joined, ${freezeDateColumn} AS freeze_date
       FROM xstats_daily_history AS daily LEFT JOIN xstats_account_assets AS assets
       ON assets.session_id = daily.session_id AND assets.account_id = daily.account_id
       LEFT JOIN xstats_account_statuses AS statuses
       ON statuses.session_id = daily.session_id AND statuses.account_id = daily.account_id
-      WHERE daily.session_id = ? ORDER BY daily.date ASC, daily.handle ASC`).bind(sessionId).all<Pick<DailyHistoryRow, "id" | "date" | "account_id" | "handle" | "display_name" | "followers" | "following" | "posts" | "fetched_at"> & { avatar_url: string | null; account_status: AccountStatus; joined: string | null }>(),
+      WHERE daily.session_id = ? ORDER BY daily.date ASC, daily.handle ASC`).bind(sessionId).all<Pick<DailyHistoryRow, "id" | "date" | "account_id" | "handle" | "display_name" | "followers" | "following" | "posts" | "fetched_at"> & { avatar_url: string | null; account_status: AccountStatus; joined: string | null; freeze_date: string | null }>(),
   ]);
   const rawAfterCutoff = raw.results.filter((row) => (dailyRecordDate(row.fetched_at) ?? "") > DAILY_HISTORY_CUTOFF);
   const rawAfterCutoffKeys = new Set(rawAfterCutoff.map((row) => `${row.account_id}|${dailyRecordDate(row.fetched_at)}`));
@@ -474,6 +496,7 @@ export async function loadEffectiveHistory(database: D1Database, sessionId: stri
       avatar_url: row.avatar_url ?? null,
       account_status: row.account_status,
       joined: row.joined ?? null,
+      freeze_date: row.freeze_date ?? null,
     }));
   return [...rawAfterCutoff, ...dailyRows].sort((left, right) => new Date(left.fetched_at).getTime() - new Date(right.fetched_at).getTime() || left.handle.localeCompare(right.handle, "ja"));
 }

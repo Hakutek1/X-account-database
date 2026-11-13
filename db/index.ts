@@ -60,6 +60,11 @@ export async function ensureSchema(database: D1Database = getD1()) {
   } catch {
     // Column already exists.
   }
+  try {
+    await db.prepare("ALTER TABLE xstats_account_statuses ADD COLUMN freeze_date TEXT").run();
+  } catch {
+    // Column already exists.
+  }
 }
 
 export async function ensureAccountTargetsSchema(database: D1Database = getD1()) {
@@ -132,7 +137,7 @@ export async function ensureSharedSession(database: D1Database = getD1()) {
     database.prepare("INSERT OR IGNORE INTO xstats_daily_history_meta (session_id, revision, backfilled, updated_at) SELECT ?, revision, backfilled, updated_at FROM xstats_daily_history_meta WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
     database.prepare("INSERT OR IGNORE INTO xstats_historical_account_exclusions (session_id, account_id, updated_at) SELECT ?, account_id, updated_at FROM xstats_historical_account_exclusions WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
     database.prepare("INSERT OR IGNORE INTO xstats_account_assets (id, session_id, account_id, avatar_key, avatar_url, avatar_data, content_type, updated_at) SELECT id, ?, account_id, avatar_key, avatar_url, avatar_data, content_type, updated_at FROM xstats_account_assets WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
-    database.prepare("INSERT OR IGNORE INTO xstats_account_statuses (session_id, account_id, status, joined_at, updated_at) SELECT ?, account_id, status, joined_at, updated_at FROM xstats_account_statuses WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
+    database.prepare("INSERT OR IGNORE INTO xstats_account_statuses (session_id, account_id, status, joined_at, freeze_date, updated_at) SELECT ?, account_id, status, joined_at, freeze_date, updated_at FROM xstats_account_statuses WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
     database.prepare("INSERT OR IGNORE INTO xstats_import_mappings (id, session_id, source_name, source_key, account_id, handle, display_name, updated_at) SELECT id, ?, source_name, source_key, account_id, handle, display_name, updated_at FROM xstats_import_mappings WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
     database.prepare("INSERT OR IGNORE INTO xstats_import_issues (id, session_id, import_id, issue_type, source_sheet, source_name, account_id, handle, display_name, date, metric, source_value, site_value, details, created_at) SELECT id, ?, import_id, issue_type, source_sheet, source_name, account_id, handle, display_name, date, metric, source_value, site_value, details, created_at FROM xstats_import_issues WHERE session_id <> ?").bind(SHARED_SESSION_ID, SHARED_SESSION_ID),
   ];

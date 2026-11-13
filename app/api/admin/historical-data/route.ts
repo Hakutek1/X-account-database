@@ -1,6 +1,6 @@
 import { dailyRecordDate, ensureDailyHistory, ensureDailyPostsThroughToday, ensureOpeningDateHistory, loadDailyHistory, loadDailyHistoryMeta, type DailyHistoryMetric, type DailyHistoryRow } from "../../../../lib/daily-history";
 import { loadAccountAssets } from "../../../../lib/account-assets";
-import { ensureAccountStatuses, isAccountStatus, loadAccountJoinedMap, loadAccountStatusMap, type AccountStatus } from "../../../../lib/account-status";
+import { ensureAccountStatuses, isAccountStatus, loadAccountFreezeDateMap, loadAccountJoinedMap, loadAccountStatusMap, type AccountStatus } from "../../../../lib/account-status";
 import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin } from "../../_shared";
 
 const METRICS = new Set<DailyHistoryMetric>(["followers", "following", "posts"]);
@@ -17,6 +17,7 @@ type AccountInput = {
   handle?: unknown;
   displayName?: unknown;
   status?: unknown;
+  freezeDate?: unknown;
 };
 
 type HistoricalBody = {
@@ -33,6 +34,7 @@ type Account = {
   handle: string;
   displayName: string;
   status: AccountStatus;
+  freezeDate?: string | null;
 };
 
 type SnapshotIdentity = {
@@ -63,9 +65,15 @@ function cleanAccount(value: AccountInput): Account | null {
   const originalAccountId = String(value.originalAccountId ?? accountId).trim() || accountId;
   const handle = String(value.handle ?? "").trim().replace(/^@/, "").toLowerCase();
   const displayName = String(value.displayName ?? "").trim();
-  const status = value.status === undefined ? "active" : value.status;
+  let status = value.status === undefined ? "active" : value.status;
   if (!isAccountStatus(status) || !accountId || !originalAccountId || !handle || !displayName || accountId.length > 200 || originalAccountId.length > 200 || handle.length > 200 || displayName.length > 300) return null;
-  return { accountId, originalAccountId, handle, displayName, status };
+  let freezeDate: string | null | undefined;
+  if (value.freezeDate === undefined) freezeDate = undefined;
+  else if (value.freezeDate === null || value.freezeDate === "") freezeDate = null;
+  else if (typeof value.freezeDate !== "string" || !validDate(value.freezeDate)) return null;
+  else freezeDate = value.freezeDate;
+  if (freezeDate) status = "suspended";
+  return { accountId, originalAccountId, handle, displayName, status, freezeDate };
 }
 
 function asNumberOrNull(value: unknown) {
@@ -162,7 +170,10 @@ export async function GET(request: Request) {
       loadAccountAssets(db, session.id),
       db.prepare("SELECT account_id FROM xstats_historical_account_exclusions WHERE session_id = ?").bind(session.id).all<{ account_id: string }>(),
     ]);
-    const statusByAccount = await loadAccountStatusMap(db, session.id);
+    const [statusByAccount, freezeDateByAccount] = await Promise.all([
+      loadAccountStatusMap(db, session.id),
+      loadAccountFreezeDateMap(db, session.id),
+    ]);
     const excludedIds = new Set(exclusions.results.map((row) => row.account_id));
     const visibleDailyRows = dailyRows.filter((row) => !excludedIds.has(row.account_id));
     const visibleSnapshots = snapshots.results.filter((row) => !excludedIds.has(row.account_id));
@@ -190,7 +201,7 @@ export async function GET(request: Request) {
     return json({
       metric,
       revision: meta.revision,
-      accounts: [...accounts.values()].map((row) => ({ accountId: row.account_id, handle: row.handle, displayName: row.display_name, status: statusByAccount.get(row.account_id) ?? "active", avatarUrl: avatarByAccount.get(row.account_id) ?? null })).sort((left, right) => left.displayName.localeCompare(right.displayName, "ja") || left.handle.localeCompare(right.handle, "ja") || left.accountId.localeCompare(right.accountId)),
+      accounts: [...accounts.values()].map((row) => ({ accountId: row.account_id, handle: row.handle, displayName: row.display_name, status: statusByAccount.get(row.account_id) ?? "active", freezeDate: freezeDateByAccount.get(row.account_id) ?? null, avatarUrl: avatarByAccount.get(row.account_id) ?? null })).sort((left, right) => left.displayName.localeCompare(right.displayName, "ja") || left.handle.localeCompare(right.handle, "ja") || left.accountId.localeCompare(right.accountId)),
       dates: [...dates].sort(),
       values,
     });
@@ -219,6 +230,7 @@ export async function PUT(request: Request) {
     const expectedRevision = Number(body.revision);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return json({ error: "履歴の版情報が正しくありません。" }, { status: 400 });
     const rawAccounts = Array.isArray(body.accounts) ? body.accounts as AccountInput[] : [];
+    if (rawAccounts.some((account) => account.freezeDate !== undefined && account.freezeDate !== null && account.freezeDate !== "" && (typeof account.freezeDate !== "string" || !validDate(account.freezeDate)))) return json({ error: "凍結日は存在する日付をYYYY-MM-DD形式で入力してください。" }, { status: 400 });
     const accounts = rawAccounts.map(cleanAccount);
     if (accounts.some((account): account is null => account === null)) return json({ error: "アカウント情報が不足しています。" }, { status: 400 });
     if (accounts.length > MAX_ACCOUNTS) return json({ error: `アカウントは${MAX_ACCOUNTS}件まで保存できます。` }, { status: 413 });
@@ -268,15 +280,24 @@ export async function PUT(request: Request) {
     if (meta.revision !== expectedRevision) return json({ error: "履歴が先に更新されました（別の管理者による保存、またはExcel日次履歴の同期）。再読み込みしてから保存してください。", conflict: true }, { status: 409 });
     const excludedIds = new Set(exclusions.results.map((row) => row.account_id));
     const knownIds = identityMap(snapshots.results, dailyRows);
-    const statusByAccount = await loadAccountStatusMap(db, session.id);
-    const joinedAtByAccount = await loadAccountJoinedMap(db, session.id);
+    const [statusByAccount, joinedAtByAccount, freezeDateByAccount] = await Promise.all([
+      loadAccountStatusMap(db, session.id),
+      loadAccountJoinedMap(db, session.id),
+      loadAccountFreezeDateMap(db, session.id),
+    ]);
+    for (const account of cleanAccounts) {
+      const previousFreezeDate = freezeDateByAccount.get(account.originalAccountId) ?? freezeDateByAccount.get(account.accountId) ?? null;
+      const requestedFreezeDate = account.freezeDate === undefined ? previousFreezeDate : account.freezeDate;
+      account.freezeDate = account.status === "suspended" ? requestedFreezeDate : null;
+    }
     const knownAccountIds = new Set([...snapshots.results.map((row) => row.account_id), ...dailyRows.map((row) => row.account_id)]);
     const submittedOriginalIds = new Set(cleanAccounts.map((account) => account.originalAccountId));
     const removedAccountIds = new Set([...knownAccountIds].filter((accountId) => !submittedOriginalIds.has(accountId) && !accountIds.has(accountId)));
     const existingMetricDates = new Set(dailyRows.filter((row) => !excludedIds.has(row.account_id) && row[body.metric] !== null).map((row) => row.date));
     const metadataChanged = cleanAccounts.some((account) => {
       const known = knownIds.get(account.originalAccountId);
-      return !known || known.handle !== account.handle || known.display_name !== account.displayName || (statusByAccount.get(account.originalAccountId) ?? "active") !== account.status;
+      const previousFreezeDate = freezeDateByAccount.get(account.originalAccountId) ?? freezeDateByAccount.get(account.accountId) ?? null;
+      return !known || known.handle !== account.handle || known.display_name !== account.displayName || (statusByAccount.get(account.originalAccountId) ?? "active") !== account.status || previousFreezeDate !== (account.freezeDate ?? null);
     }) || removedAccountIds.size > 0;
     const newAccountWithoutValue = cleanAccounts.some((account) => !knownIds.has(account.originalAccountId) && !Object.values(values[account.accountId] ?? {}).some((value) => value !== null));
     if (newAccountWithoutValue) return json({ error: "新しいアカウントには少なくとも1つの数値を入力してください。" }, { status: 400 });
@@ -368,10 +389,12 @@ export async function PUT(request: Request) {
     const renamedAccounts = identityChanges.filter((account) => account.originalAccountId !== account.accountId);
     const statusWrites = cleanAccounts.filter((account) => {
       const previousStatus = statusByAccount.get(account.originalAccountId) ?? statusByAccount.get(account.accountId);
-      return account.originalAccountId !== account.accountId || previousStatus === undefined || previousStatus !== account.status;
+      const previousFreezeDate = freezeDateByAccount.get(account.originalAccountId) ?? freezeDateByAccount.get(account.accountId) ?? null;
+      return account.originalAccountId !== account.accountId || previousStatus === undefined || previousStatus !== account.status || previousFreezeDate !== (account.freezeDate ?? null);
     }).map((account) => ({
       accountId: account.accountId,
       status: account.status,
+      freezeDate: account.freezeDate ?? null,
       joinedAt: joinedAtByAccount.get(account.originalAccountId) ?? joinedAtByAccount.get(account.accountId) ?? null,
     }));
     const activeAccountIds = cleanAccounts.flatMap((account) => [account.originalAccountId, account.accountId]);
@@ -448,12 +471,13 @@ export async function PUT(request: Request) {
           AND ${guard}`).bind(JSON.stringify(batch), session.id, session.id, expectedRevision + 1, writeMarker));
     }
     for (const batch of splitJsonBatches(statusWrites)) {
-      statements.push(db.prepare(`INSERT INTO xstats_account_statuses (session_id, account_id, status, joined_at, updated_at)
-        SELECT ?, json_extract(value, '$.accountId'), json_extract(value, '$.status'), json_extract(value, '$.joinedAt'), ?
+      statements.push(db.prepare(`INSERT INTO xstats_account_statuses (session_id, account_id, status, joined_at, freeze_date, updated_at)
+        SELECT ?, json_extract(value, '$.accountId'), json_extract(value, '$.status'), json_extract(value, '$.joinedAt'), json_extract(value, '$.freezeDate'), ?
         FROM json_each(?) WHERE ${guard}
         ON CONFLICT(session_id, account_id) DO UPDATE SET
           status = excluded.status,
           joined_at = COALESCE(xstats_account_statuses.joined_at, excluded.joined_at),
+          freeze_date = excluded.freeze_date,
           updated_at = excluded.updated_at`).bind(session.id, now, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
     }
 

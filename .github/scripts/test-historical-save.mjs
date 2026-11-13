@@ -41,8 +41,8 @@ const accountPayload = loaded.body.accounts.map((item) => ({
 function makeValues(source) {
   return Object.fromEntries(loaded.body.accounts.map((item) => [item.accountId, { ...(source.values?.[item.accountId] ?? {}) }]));
 }
-function makeBody(revision, values) {
-  return { metric: "followers", revision, accounts: accountPayload, dates: loaded.body.dates, values };
+function makeBody(revision, values, accounts = accountPayload) {
+  return { metric: "followers", revision, accounts, dates: loaded.body.dates, values };
 }
 const baselineValues = makeValues(loaded.body);
 const revisionBeforeNoop = loaded.body.revision;
@@ -157,6 +157,65 @@ const afterPayloadCap = await request("/api/admin/historical-data?metric=followe
 assert.equal(afterPayloadCap.body.revision, beforePayloadCap.body.revision, "payload-size rejection must preserve the revision");
 assert.deepEqual(afterPayloadCap.body.values, beforePayloadCap.body.values, "payload-size rejection must preserve all saved history");
 
+
+const beforeFreeze = await request("/api/admin/historical-data?metric=followers", { cookie });
+const freezeAccounts = beforeFreeze.body.accounts.map((item) => ({
+  accountId: item.accountId,
+  originalAccountId: item.accountId,
+  handle: item.handle,
+  displayName: item.displayName,
+  status: item.status,
+  freezeDate: item.freezeDate ?? null,
+}));
+const freezeAccount = freezeAccounts.find((item) => item.accountId === account.accountId);
+assert.ok(freezeAccount, "freeze-date fixture account must be available");
+freezeAccount.status = "suspended";
+freezeAccount.freezeDate = "2025-02-28";
+const freezeSaved = await request("/api/admin/historical-data", {
+  cookie,
+  method: "PUT",
+  body: makeBody(beforeFreeze.body.revision, makeValues(beforeFreeze.body), freezeAccounts),
+});
+assert.equal(freezeSaved.response.status, 200, JSON.stringify(freezeSaved.body));
+const afterFreeze = await request("/api/admin/historical-data?metric=followers", { cookie });
+const frozenAccount = afterFreeze.body.accounts.find((item) => item.accountId === account.accountId);
+assert.equal(frozenAccount.status, "suspended");
+assert.equal(frozenAccount.freezeDate, "2025-02-28", "freeze date must persist through the admin API");
+const invalidFreezeAccounts = afterFreeze.body.accounts.map((item) => ({
+  accountId: item.accountId,
+  originalAccountId: item.accountId,
+  handle: item.handle,
+  displayName: item.displayName,
+  status: item.status,
+  freezeDate: item.accountId === account.accountId ? "2025-02-30" : item.freezeDate ?? null,
+}));
+const invalidFreeze = await request("/api/admin/historical-data", {
+  cookie,
+  method: "PUT",
+  body: makeBody(afterFreeze.body.revision, makeValues(afterFreeze.body), invalidFreezeAccounts),
+});
+assert.equal(invalidFreeze.response.status, 400, "invalid calendar dates must be rejected");
+const afterInvalidFreeze = await request("/api/admin/historical-data?metric=followers", { cookie });
+assert.equal(afterInvalidFreeze.body.revision, afterFreeze.body.revision, "invalid freeze dates must not advance the revision");
+assert.equal(afterInvalidFreeze.body.accounts.find((item) => item.accountId === account.accountId).freezeDate, "2025-02-28");
+const clearedFreezeAccounts = afterFreeze.body.accounts.map((item) => ({
+  accountId: item.accountId,
+  originalAccountId: item.accountId,
+  handle: item.handle,
+  displayName: item.displayName,
+  status: item.accountId === account.accountId ? "active" : item.status,
+  freezeDate: item.accountId === account.accountId ? null : item.freezeDate ?? null,
+}));
+const freezeCleared = await request("/api/admin/historical-data", {
+  cookie,
+  method: "PUT",
+  body: makeBody(afterFreeze.body.revision, makeValues(afterFreeze.body), clearedFreezeAccounts),
+});
+assert.equal(freezeCleared.response.status, 200, JSON.stringify(freezeCleared.body));
+const afterClear = await request("/api/admin/historical-data?metric=followers", { cookie });
+const clearedAccount = afterClear.body.accounts.find((item) => item.accountId === account.accountId);
+assert.equal(clearedAccount.status, "active", "changing to a non-frozen status must clear the freeze state");
+assert.equal(clearedAccount.freezeDate, null);
 
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 try {

@@ -1,3 +1,4 @@
+import { isValidFreezeDate } from "./freeze-date.ts";
 export const ACCOUNT_STATUSES = ["active", "ended", "suspended", "non_alt"] as const;
 export type AccountStatus = typeof ACCOUNT_STATUSES[number];
 
@@ -50,4 +51,12 @@ export async function loadAccountStatusMap(database: D1Database, sessionId: stri
 export async function loadAccountJoinedMap(database: D1Database, sessionId: string) {
   const result = await database.prepare("SELECT account_id, joined_at FROM xstats_account_statuses WHERE session_id = ?").bind(sessionId).all<{ account_id: string; joined_at: string | null }>();
   return new Map(result.results.map((row) => [row.account_id, row.joined_at] as const));
+}
+
+/** Read nullable freeze dates without requiring a schema write on public GET routes. */
+export async function loadAccountFreezeDateMap(database: D1Database, sessionId: string) {
+  const columns = await database.prepare('PRAGMA table_info("xstats_account_statuses")').all<{ name: string }>();
+  if (!columns.results.some((column) => column.name === "freeze_date")) return new Map<string, string | null>();
+  const result = await database.prepare("SELECT account_id, freeze_date FROM xstats_account_statuses WHERE session_id = ?").bind(sessionId).all<{ account_id: string; freeze_date: string | null }>();
+  return new Map(result.results.map((row) => [row.account_id, isValidFreezeDate(row.freeze_date) ? row.freeze_date : null] as const));
 }
