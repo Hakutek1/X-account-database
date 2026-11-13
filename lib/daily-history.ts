@@ -114,9 +114,7 @@ async function migrateLegacyDailyBuckets(database: D1Database, sessionId: string
     database.prepare(`SELECT id, session_id, date, account_id, handle, display_name, followers, following, posts
       FROM xstats_daily_history WHERE session_id = ? AND origin = 'migration' ORDER BY date ASC`).bind(sessionId).all<DailyHistoryRow>(),
     loadAccountFreezeDateMap(database, sessionId),
-    database.prepare("SELECT account_id FROM xstats_account_statuses WHERE session_id = ? AND status = 'suspended'").bind(sessionId).all<{account_id:string}>(),
   ]);
-  const suspendedIds = new Set(suspendedAccounts.results.map(row => row.account_id));
   const statements: D1PreparedStatement[] = [];
   for (const row of legacy.results) {
     const date = addCalendarDays(row.date, 1);
@@ -240,7 +238,9 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
     database.prepare("SELECT account_id, joined_at FROM xstats_account_statuses WHERE session_id = ? AND joined_at IS NOT NULL").bind(sessionId).all<{ account_id: string; joined_at: string }>(),
     database.prepare("SELECT account_id, date, posts, origin FROM xstats_daily_history WHERE session_id = ? AND date <= ?").bind(sessionId, today).all<ExistingPostRecord>(),
     loadAccountFreezeDateMap(database, sessionId),
+    database.prepare("SELECT account_id FROM xstats_account_statuses WHERE session_id = ? AND status = 'suspended'").bind(sessionId).all<{account_id:string}>(),
   ]);
+  const suspendedIds = new Set(suspendedAccounts.results.map(row => row.account_id));
   const latestByAccount = new Map<string, LatestPostRecord>();
   const recordedPostsByAccount = new Map<string, LatestPostRecord[]>();
   const consider = (candidate: LatestPostRecord) => {
