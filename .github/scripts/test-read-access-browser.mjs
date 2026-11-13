@@ -97,12 +97,13 @@ try {
   await publicPage.route("**/api/history", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(history) }));
   await publicPage.route("**/api/site-version", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ version: 105, label: "Ver.1.05" }) }));
   await publicPage.goto(origin, { waitUntil: "networkidle" });
-  await publicPage.getByRole("heading", { name: "共有データを閲覧中" }).waitFor();
+  await publicPage.getByText("複垢データベース", { exact: true }).waitFor();
   const publicName = publicPage.locator(".results-table input[aria-label=\"private_fixtureの表示名\"]");
   await publicName.waitFor({ state: "visible" });
   assert.equal(await publicName.inputValue(), "保護されたアカウント", "public mode should render history without login");
   await publicPage.screenshot({ path: join(outputDirectory, "public-dashboard.png"), fullPage: true });
-  assert.equal(await publicPage.getByRole("heading", { name: "調べたいアカウントを追加" }).count(), 0, "public visitors must not see administrator write controls");
+  assert.equal(await publicPage.getByRole("button", { name: "登録アカウントを編集" }).count(), 0, "public visitors must not see account editing controls");
+  assert.equal(await publicPage.getByRole("button", { name: /データを取得する/ }).count(), 0, "public visitors must not see data collection controls");
   await publicPage.close();
   console.log("private/public browser access checks passed");
 } finally {

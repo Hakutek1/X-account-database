@@ -38,6 +38,14 @@ async function getTargets() {
   return result.body;
 }
 
+async function waitForRegisteredCount(page, expected) {
+  const selector = ".account-editor-dialog[open] .input-count";
+  await page.waitForFunction(({ selector, expected }) => {
+    const count = document.querySelector(selector)?.textContent ?? "";
+    return new RegExp("^" + expected + "\\s*/\\s*500").test(count);
+  }, { selector, expected }, { timeout: 30000 });
+}
+
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 const contexts = [];
 async function makeBrowserPage(handles) {
@@ -50,22 +58,21 @@ async function makeBrowserPage(handles) {
   }, { dashboardKey, targetKey, handles });
   const page = await context.newPage();
   await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await page.locator(".input-footer .input-count").waitFor({ state: "visible", timeout: 30000 });
+  await page.getByRole("button", { name: "登録アカウントを編集" }).click();
+  await page.locator(".account-editor-dialog[open] .input-count").waitFor({ state: "visible", timeout: 30000 });
   return page;
 }
 
 try {
   const first = await makeBrowserPage(["alpha", "beta"]);
-  await first.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("2件登録"), null, { timeout: 30000 });
-  await first.getByRole("button", { name: "登録アカウントを編集" }).click();
+  await waitForRegisteredCount(first, 2);
   await assert.doesNotReject(() => first.getByRole("list", { name: "取得対象アカウント" }).getByText("@alpha", { exact: true }).waitFor());
   let shared = await getTargets();
   assert.deepEqual(shared.handles, ["alpha", "beta"]);
   assert.equal(shared.initialized, true, "first login should initialize shared storage");
 
   const second = await makeBrowserPage(["alpha", "legacy"]);
-  await second.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("2件登録"), null, { timeout: 30000 });
-  await second.getByRole("button", { name: "登録アカウントを編集" }).click();
+  await waitForRegisteredCount(second, 2);
   await second.getByRole("status").filter({ hasText: "この端末だけに保存" }).waitFor({ timeout: 30000 });
   assert.deepEqual((await getTargets()).handles, ["alpha", "beta"], "legacy local-only target must not merge automatically");
   await second.getByRole("button", { name: "この端末の未共有アカウントを共有一覧に追加" }).click();
@@ -80,8 +87,9 @@ try {
   assert.ok(shared.handles.includes("newuser"), "new target should persist in D1");
 
   await first.reload({ waitUntil: "domcontentloaded" });
-  await first.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("4件登録"), null, { timeout: 30000 });
   await first.getByRole("button", { name: "登録アカウントを編集" }).click();
+  await first.locator(".account-editor-dialog[open] .input-count").waitFor({ state: "visible", timeout: 30000 });
+  await waitForRegisteredCount(first, 4);
   await first.getByRole("button", { name: "@newuserを取得対象から外す" }).click();
   await first.getByText("過去データは保持されています。").waitFor({ timeout: 30000 });
   shared = await getTargets();
@@ -89,7 +97,9 @@ try {
   assert.equal(shared.handles.length, 3);
 
   await second.reload({ waitUntil: "domcontentloaded" });
-  await second.waitForFunction(() => document.querySelector(".input-footer .input-count")?.textContent?.includes("3件登録"), null, { timeout: 30000 });
+  await second.getByRole("button", { name: "登録アカウントを編集" }).click();
+  await second.locator(".account-editor-dialog[open] .input-count").waitFor({ state: "visible", timeout: 30000 });
+  await waitForRegisteredCount(second, 3);
 
   const raceBase = await getTargets();
   const raceResults = await Promise.all([

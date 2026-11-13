@@ -8,6 +8,7 @@ import { canonicalDailyFetchedAt, dailyRecordDate } from "../lib/daily-history";
 import { ACCOUNT_STATUS_LABELS, ACCOUNT_STATUSES, isAccountStatus, type AccountStatus } from "../lib/account-status";
 import HistoricalDataEditor from "./historical-data-editor";
 import ExternalAvatarImage from "./external-avatar-image";
+import ImageShareMenu from "./image-share-menu";
 import { resolveLinearAxisDomain } from "../lib/chart-axis";
 import { FALLBACK_SITE_VERSION_NUMBER, formatSiteVersion } from "../lib/site-version";
 import { filterChartPickerAccounts, getNextChartMarkIndex, getRovingTabIndex, groupChartPickerAccounts, updateChartSelection } from "../lib/chart-accessibility";
@@ -68,7 +69,7 @@ type HistoryRow = {
 };
 
 type LatestCollection = { fetched_at: string; success_count: number; error_count: number };
-type HistoryResponse = { runs?: { id: string; fetched_at: string }[]; rows?: HistoryRow[]; latestCollection?: LatestCollection | null; error?: string };
+type HistoryResponse = { runs?: { id: string; fetched_at: string }[]; rows?: HistoryRow[]; latestCollection?: LatestCollection | null; registeredAccountCount?: number; error?: string };
 type CollectResponse = { rows?: AccountRow[]; warnings?: string[]; error?: string };
 type AdminStatus = { configured?: boolean; isAdmin?: boolean; readMode?: "private" | "public"; error?: string };
 type AccountTargetsResponse = { handles?: string[]; revision?: number; initialized?: boolean; changed?: boolean; conflict?: boolean; error?: string };
@@ -412,7 +413,21 @@ function AccountStatusBadge({ status }: { status: AccountStatus | undefined }) {
   return <span className={`account-status-badge account-status-${status ?? "active"}`}>{accountStatusLabel(status)}</span>;
 }
 
-function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, displayNameOverrides, onDisplayNameChange }: { rows: AccountRow[]; onSort: (key: SortKey) => void; sortKey: SortKey; direction: "asc" | "desc"; previousByAccount: Map<string, PreviousMetrics>; displayNameOverrides: Readonly<Record<string, string>>; onDisplayNameChange: (row: AccountRow, value: string) => void }) {
+function CalendarIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="5" width="17" height="16" rx="1" /><path d="M7.5 3v4M16.5 3v4M4 9.5h16" /></svg>;
+}
+
+function PencilIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4 16.8-.8 4 4-.8L19 8.2 15.8 5 4 16.8Z" /><path d="m13.8 7 3.2 3.2" /></svg>;
+}
+
+function ThemeIcon({ mode }: { mode: Theme }) {
+  return mode === "dark"
+    ? <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.5" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
+    : <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.2 15.2A8.7 8.7 0 0 1 8.8 3.8 8.7 8.7 0 1 0 20.2 15.2Z" /></svg>;
+}
+
+function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, displayNameOverrides, onDisplayNameChange, displayNameEditMode }: { rows: AccountRow[]; onSort: (key: SortKey) => void; sortKey: SortKey; direction: "asc" | "desc"; previousByAccount: Map<string, PreviousMetrics>; displayNameOverrides: Readonly<Record<string, string>>; onDisplayNameChange: (row: AccountRow, value: string) => void; displayNameEditMode: boolean }) {
   if (!rows.length) return <div className="empty-table">まだ取得データがありません。上のフォームからアカウントを追加してください。</div>;
   return (
     <div className="results-display">
@@ -426,8 +441,8 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
       <div className="table-shell">
         <table className="results-table">
           <thead><tr>
-            <TableHeader label="アカウント" sortKey="handle" activeKey={sortKey} direction={direction} onSort={onSort} />
             <TableHeader label="表示名" sortKey="displayName" activeKey={sortKey} direction={direction} onSort={onSort} />
+            <TableHeader label="アカウント" sortKey="handle" activeKey={sortKey} direction={direction} onSort={onSort} />
             <TableHeader label="フォロワー" sortKey="followers" activeKey={sortKey} direction={direction} onSort={onSort} />
             <TableHeader label="前回比" sortKey="followersDelta" activeKey={sortKey} direction={direction} onSort={onSort} />
             <TableHeader label="フォロー" sortKey="following" activeKey={sortKey} direction={direction} onSort={onSort} />
@@ -437,6 +452,7 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
           </tr></thead>
           <tbody>{rows.map((row) => (
             <tr key={row.id + "-" + row.handle} className={row.status === "error" ? "is-error" : ""}>
+              <td><div className="display-name-cell"><input className={`display-name-input ${displayNameEditMode ? "is-editing" : ""}`} readOnly={!displayNameEditMode} value={resolvedDisplayName(row, displayNameOverrides)} onChange={(event) => onDisplayNameChange(row, event.target.value)} aria-label={row.handle + "の表示名"} /><small>元の表示名：{row.displayName}</small><AccountStatusBadge status={row.accountStatus} /></div></td>
               <td>
                 {row.status === "ok" ? <a className="account-link" href={"https://x.com/" + encodeURIComponent(row.handle)} target="_blank" rel="noreferrer">
                   {row.avatarUrl ? <ExternalAvatarImage className="account-avatar" src={row.avatarUrl} /> : <span className="account-avatar account-avatar-fallback" aria-hidden="true">{row.handle.slice(0, 1).toUpperCase()}</span>}
@@ -444,7 +460,6 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
                 </a> : <span className="account-link account-link-disabled"><span className="account-avatar account-avatar-fallback" aria-hidden="true">?</span><span className="handle-cell">@{row.handle}</span></span>}
                 {row.status === "error" && <span className="status-pill status-error">失敗</span>}
               </td>
-              <td><div className="display-name-cell"><input className="display-name-input" value={resolvedDisplayName(row, displayNameOverrides)} onChange={(event) => onDisplayNameChange(row, event.target.value)} aria-label={row.handle + "の表示名"} /><small>元の表示名：{row.displayName}</small><AccountStatusBadge status={row.accountStatus} /></div></td>
               <MetricCell value={row.followers} />
               <DeltaCell value={previousByAccount.get(row.id)?.followers} />
               <td className="numeric-cell">{formatNormalMetricNumber(row.following)}</td>
@@ -460,6 +475,7 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
           const followersDelta = previousByAccount.get(row.id)?.followers;
           const postsDelta = previousByAccount.get(row.id)?.posts;
           return <article className={"results-mobile-card " + (row.status === "error" ? "is-error" : "")} role="listitem" key={row.id + "-mobile-" + row.handle}>
+            <label className="results-mobile-name"><span>表示名</span><input className={displayNameEditMode ? "is-editing" : ""} readOnly={!displayNameEditMode} value={resolvedDisplayName(row, displayNameOverrides)} onChange={(event) => onDisplayNameChange(row, event.target.value)} aria-label={row.handle + "の表示名"} /><small>元の表示名：{row.displayName}</small></label>
             <div className="results-mobile-identity">
               <div className="results-mobile-account">
                 {row.status === "ok" ? <a className="account-link" href={"https://x.com/" + encodeURIComponent(row.handle)} target="_blank" rel="noreferrer">
@@ -470,11 +486,10 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
               </div>
               {row.status === "error" && <span className="status-pill status-error">失敗</span>}
             </div>
-            <label className="results-mobile-name"><span>表示名</span><input value={resolvedDisplayName(row, displayNameOverrides)} onChange={(event) => onDisplayNameChange(row, event.target.value)} aria-label={row.handle + "の表示名"} /><small>元の表示名：{row.displayName}</small></label>
             {row.status === "ok" ? <div className="results-mobile-metrics">
-              <div className="results-mobile-metric"><span>フォロワー</span><strong>{formatResultNumber(row.followers)}</strong><small className={deltaClass(followersDelta)}>前回比 {formatResultDelta(followersDelta)}</small></div>
+              <div className="results-mobile-metric"><span>フォロワー</span><div className="results-mobile-metric-value"><strong>{formatResultNumber(row.followers)}</strong><small className={deltaClass(followersDelta)}>{formatResultDelta(followersDelta)}</small></div></div>
               <div className="results-mobile-metric"><span>フォロー</span><strong>{formatResultNumber(row.following)}</strong></div>
-              <div className="results-mobile-metric"><span>投稿</span><strong>{formatResultNumber(row.posts)}</strong><small className={deltaClass(postsDelta)}>前回比 {formatResultDelta(postsDelta)}</small></div>
+              <div className="results-mobile-metric"><span>投稿</span><div className="results-mobile-metric-value"><strong>{formatResultNumber(row.posts)}</strong><small className={deltaClass(postsDelta)}>{formatResultDelta(postsDelta)}</small></div></div>
             </div> : <p className="results-mobile-error">{row.error ?? "取得できませんでした"}</p>}
             <div className="results-mobile-date"><span>開設日</span><strong>{row.status === "ok" ? formatDate(row.joined) : "—"}</strong></div>
           </article>;
@@ -532,10 +547,10 @@ function rankTopRows(rows: AccountRow[], metric: TopMetric, previousByAccount: M
     });
 }
 
-function DateCalendar({ availableDates, selectedDate, onDateChange, note = "黄緑色の日はデータあり", headingLabel = "表示日", size = "normal" }: { availableDates: string[]; selectedDate: string; onDateChange: (date: string) => void; note?: string; headingLabel?: string; size?: "normal" | "small" }) {
+function DateCalendar({ availableDates, selectedDate, onDateChange, note = "黄緑色の日はデータあり", headingLabel = "取得日", size = "normal" }: { availableDates: string[]; selectedDate: string; onDateChange: (date: string) => void; note?: string; headingLabel?: string; size?: "normal" | "small" }) {
   const availableDateSet = new Set(availableDates);
   const pickerClass = size === "small" ? " top15-date-picker-small" : "";
-  const [calendarMonth, setCalendarMonth] = useState(selectedDate ? selectedDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
+  const [calendarMonth, setCalendarMonth] = useState((selectedDate || availableDates.at(-1) || new Date().toISOString().slice(0, 10)).slice(0, 7));
   const monthStart = new Date(`${calendarMonth}-01T00:00:00Z`);
   const firstWeekday = monthStart.getUTCDay();
   const daysInMonth = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
@@ -551,7 +566,23 @@ function DateCalendar({ availableDates, selectedDate, onDateChange, note = "黄�
   return <div className={`top15-date-picker${pickerClass}`}><div className="top15-date-picker-heading"><strong>{headingLabel}：{selectedDate || "—"}</strong><span>{note}</span></div><div className="top15-calendar-nav"><button type="button" className="secondary-button" onClick={() => setCalendarMonth(shiftDateKey(`${calendarMonth}-01`, -1).slice(0, 7))} aria-label="前の月">‹</button><strong>{calendarLabel}</strong><button type="button" className="secondary-button" onClick={() => setCalendarMonth(shiftDateKey(`${calendarMonth}-01`, 32).slice(0, 7))} aria-label="次の月">›</button></div><div className="top15-calendar-weekdays">{["日", "月", "火", "水", "木", "金", "土"].map((day) => <span key={day}>{day}</span>)}</div><div className="top15-calendar-grid">{calendarCells.map((date, index) => date ? <button key={date} type="button" className={`top15-calendar-day ${availableDateSet.has(date) ? "has-data" : ""} ${selectedDate === date ? "is-selected" : ""}`} disabled={Boolean(minDate && maxDate && (date < minDate || date > maxDate))} onClick={() => onDateChange(date)} aria-label={`${date}${availableDateSet.has(date) ? " データあり" : " データなし"}`}>{Number(date.slice(-2))}</button> : <span key={`blank-${index}`} className="top15-calendar-blank" />)}</div></div>;
 }
 
-function TopResults({ rows, topMetric, onTopMetricChange, previousByAccount, displayNameOverrides, onDownloadImage, availableDates, selectedDate, onDateChange, comparisonTargetDate, onComparisonDateChange, expanded, onToggleExpanded }: { rows: AccountRow[]; topMetric: TopMetric; onTopMetricChange: (metric: TopMetric) => void; previousByAccount: Map<string, PreviousMetrics>; displayNameOverrides: Readonly<Record<string, string>>; onDownloadImage: () => void | Promise<void>; availableDates: string[]; selectedDate: string; onDateChange: (date: string) => void; comparisonTargetDate: string; onComparisonDateChange: (value: string) => void; expanded: boolean; onToggleExpanded: () => void }) {
+function ChartDatePicker({ availableDates, selectedDate, onDateChange, headingLabel, clearable = false }: { availableDates: string[]; selectedDate: string; onDateChange: (date: string) => void; headingLabel: string; clearable?: boolean }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const calendarId = useId();
+  const controlLabel = `${headingLabel}カレンダー`;
+  return <div className={`chart-date-control ${isOpen ? "is-open" : ""}`}>
+    <div className="chart-date-control-row">
+      <button type="button" className="calendar-toggle chart-calendar-toggle" onClick={() => setIsOpen((open) => !open)} aria-expanded={isOpen} aria-controls={calendarId} aria-label={`${controlLabel}を${isOpen ? "閉じる" : "開く"}`} disabled={!availableDates.length}><CalendarIcon /></button>
+      <div className="chart-date-copy"><span>{headingLabel}</span><strong>{selectedDate || "—"}</strong></div>
+    </div>
+    <div id={calendarId} className="chart-date-popover" hidden={!isOpen}>
+      {clearable && selectedDate && <button type="button" className="chart-date-clear" onClick={() => onDateChange("")} aria-label={`${headingLabel}を解除`}>日付を解除</button>}
+      <DateCalendar key={`${headingLabel}-${selectedDate}`} availableDates={availableDates} selectedDate={selectedDate} onDateChange={onDateChange} headingLabel={headingLabel} size="small" />
+    </div>
+  </div>;
+}
+
+function TopResults({ rows, topMetric, onTopMetricChange, previousByAccount, displayNameOverrides, onDownloadImage, availableDates, selectedDate, onDateChange, comparisonTargetDate, onComparisonDateChange, expanded, onToggleExpanded, latestCollectionLabel }: { rows: AccountRow[]; topMetric: TopMetric; onTopMetricChange: (metric: TopMetric) => void; previousByAccount: Map<string, PreviousMetrics>; displayNameOverrides: Readonly<Record<string, string>>; onDownloadImage: () => Promise<boolean>; availableDates: string[]; selectedDate: string; onDateChange: (date: string) => void; comparisonTargetDate: string; onComparisonDateChange: (value: string) => void; expanded: boolean; onToggleExpanded: () => void; latestCollectionLabel: string }) {
   const hasRowsForDate = rows.some((row) => row.status === "ok");
   const rankedRows = rankTopRows(rows, topMetric, previousByAccount);
   const topRows = rankedRows.slice(0, 15);
@@ -565,22 +596,27 @@ function TopResults({ rows, topMetric, onTopMetricChange, previousByAccount, dis
       onComparisonDateChange(fallback);
     }
   };
-  const renderCalendars = (closeAfterSelection: boolean) => {
+  const renderCalendars = () => {
     const afterSelection = (onSelect: (date: string) => void) => (date: string) => {
       onSelect(date);
-      if (closeAfterSelection) setCalendarOpen(false);
     };
     return isTopDeltaMetric(topMetric)
       ? <div className="top15-calendar-pair"><DateCalendar key={`comparison-${comparisonTargetDate}`} headingLabel="開始日" size="small" availableDates={comparisonDates} selectedDate={comparisonTargetDate} onDateChange={afterSelection(onComparisonDateChange)} /><DateCalendar key={`selected-${selectedDate}`} headingLabel="終了日" size="small" availableDates={availableDates} selectedDate={selectedDate} onDateChange={afterSelection(handleSelectedDateChange)} /></div>
       : <DateCalendar key={selectedDate} size="small" availableDates={availableDates} selectedDate={selectedDate} onDateChange={afterSelection(onDateChange)} />;
   };
-  const calendarSummary = isTopDeltaMetric(topMetric) ? `開始 ${comparisonTargetDate || "—"} ／ 終了 ${selectedDate || "—"}` : `表示日 ${selectedDate || "—"}`;
+  const calendarSummary = isTopDeltaMetric(topMetric) ? `開始 ${comparisonTargetDate || "—"} ／ 終了 ${selectedDate || "—"}` : selectedDate || "—";
   return <div className="top15-panel">
-    <div className="top15-toolbar results-ranking-toolbar"><div className="top15-metric-tabs ranking-metric-tabs" role="tablist" aria-label="ランキング指標" onKeyDown={(event) => handleTabListKeyDown(event, Object.keys(topMetricLabels) as TopMetric[], onTopMetricChange)}>{(Object.keys(topMetricLabels) as TopMetric[]).map((metric) => <button key={metric} id={"ranking-metric-tab-" + metric} type="button" role="tab" aria-selected={topMetric === metric} aria-controls={"ranking-metric-panel-" + metric} tabIndex={topMetric === metric ? 0 : -1} className={topMetric === metric ? "is-active" : ""} onClick={() => onTopMetricChange(metric)}>{topMetricLabels[metric]}</button>)}</div><button type="button" className="secondary-button ranking-export-button" onClick={() => void onDownloadImage()} disabled={!topRows.length}>画像を保存</button></div>
-    <div className="ranking-metric-panel" id={"ranking-metric-panel-" + topMetric} role="tabpanel" aria-labelledby={"ranking-metric-tab-" + topMetric} tabIndex={0}>
-    <div className={`top15-layout ${isTopDeltaMetric(topMetric) ? "top15-layout-delta" : "top15-layout-scalar"}`}>
-      <div className="top15-date-column ranking-date-controls"><div className="top15-date-desktop">{renderCalendars(false)}</div><details className="top15-date-mobile" open={calendarOpen} onToggle={(event) => setCalendarOpen(event.currentTarget.open)}><summary><span>日付を選択</span><small>{calendarSummary}</small></summary><div className="top15-date-mobile-content">{renderCalendars(true)}</div></details></div>
+    <div className="ranking-primary-controls">
+      <div className="results-date-control">
+        <button type="button" className="calendar-toggle" onClick={() => setCalendarOpen((open) => !open)} aria-expanded={calendarOpen} aria-label={calendarOpen ? "ランキングの日付カレンダーを閉じる" : "ランキングの日付カレンダーを開く"} disabled={!availableDates.length}><CalendarIcon /></button>
+        <span className="calendar-toggle-label">日付変更</span>
+        <div className="results-date-copy"><strong>{calendarSummary}</strong><span className="collection-status-inline">{latestCollectionLabel}</span></div>
+      </div>
+      <ImageShareMenu buttonClassName="secondary-button ranking-export-button" containerClassName="ranking-export-control" onDownload={onDownloadImage} disabled={!topRows.length} />
     </div>
+    {calendarOpen && <div className="ranking-calendar-panel">{renderCalendars()}</div>}
+    <div className="top15-toolbar results-ranking-toolbar"><div className="top15-metric-tabs ranking-metric-tabs" role="tablist" aria-label="ランキング指標" onKeyDown={(event) => handleTabListKeyDown(event, Object.keys(topMetricLabels) as TopMetric[], onTopMetricChange)}>{(Object.keys(topMetricLabels) as TopMetric[]).map((metric) => <button key={metric} id={"ranking-metric-tab-" + metric} type="button" role="tab" aria-selected={topMetric === metric} aria-controls={"ranking-metric-panel-" + metric} tabIndex={topMetric === metric ? 0 : -1} className={topMetric === metric ? "is-active" : ""} onClick={() => onTopMetricChange(metric)}>{topMetricLabels[metric]}</button>)}</div></div>
+    <div className="ranking-metric-panel" id={"ranking-metric-panel-" + topMetric} role="tabpanel" aria-labelledby={"ranking-metric-tab-" + topMetric} tabIndex={0}>
     {topRows.length ? <><div className="top15-grid">{topRows.map((row, index) => {
       const value = topMetricValue(row, topMetric, previousByAccount);
       const displayName = resolvedDisplayName(row, displayNameOverrides);
@@ -781,7 +817,7 @@ function buildCumulativeFollowerPoints(historyRows: HistoryRow[], selectedHandle
   return [...buckets.values()].sort((left, right) => left.timestamp - right.timestamp);
 }
 
-const SimpleChart = memo(function SimpleChart({ mode, metric, chartTitle, chartTitleFontSize, currentRows, historyRows, selectedHandles, compareDate, comparisonDate, startDate, endDate, granularity, dateFormat, yMin, yMax, yStep, yMinorStep, compactNumbers, compareOrientation, displayNameOverrides, legendColors, barColor, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, theme, showTrendLegend, logScale, onLogScaleEligibilityChange, onExportReady }: { mode: ChartMode; metric: ChartMetric; chartTitle: string; chartTitleFontSize: number; currentRows: AccountRow[]; historyRows: HistoryRow[]; selectedHandles: string[]; compareDate: string; comparisonDate: string; startDate: string; endDate: string; granularity: Granularity; dateFormat: "short" | "month" | "full"; yMin: string; yMax: string; yStep: string; yMinorStep: string; compactNumbers: boolean; compareOrientation: CompareOrientation; displayNameOverrides: Readonly<Record<string, string>>; legendColors: Readonly<Record<string, string>>; barColor: string; trendLineWidth: number; markerSize: number; markerOutlineWidth: number; markerOutlineColor: string; trendValueFontSize: number; trendAxisFontSize: number; trendDateFontSize: number; trendValueLabelColor: "series" | "black"; compareLabelFontSize: number; theme: Theme; showTrendLegend: boolean; logScale: boolean; onLogScaleEligibilityChange: (eligible: boolean) => void; onExportReady: (handler: () => Promise<void>) => void }) {
+const SimpleChart = memo(function SimpleChart({ mode, metric, chartTitle, chartTitleFontSize, currentRows, historyRows, selectedHandles, compareDate, comparisonDate, startDate, endDate, granularity, dateFormat, yMin, yMax, yStep, yMinorStep, compactNumbers, compareOrientation, displayNameOverrides, legendColors, barColor, trendLineWidth, markerSize, markerOutlineWidth, markerOutlineColor, trendValueFontSize, trendAxisFontSize, trendDateFontSize, trendValueLabelColor, compareLabelFontSize, theme, showTrendLegend, logScale, onLogScaleEligibilityChange, onExportReady }: { mode: ChartMode; metric: ChartMetric; chartTitle: string; chartTitleFontSize: number; currentRows: AccountRow[]; historyRows: HistoryRow[]; selectedHandles: string[]; compareDate: string; comparisonDate: string; startDate: string; endDate: string; granularity: Granularity; dateFormat: "short" | "month" | "full"; yMin: string; yMax: string; yStep: string; yMinorStep: string; compactNumbers: boolean; compareOrientation: CompareOrientation; displayNameOverrides: Readonly<Record<string, string>>; legendColors: Readonly<Record<string, string>>; barColor: string; trendLineWidth: number; markerSize: number; markerOutlineWidth: number; markerOutlineColor: string; trendValueFontSize: number; trendAxisFontSize: number; trendDateFontSize: number; trendValueLabelColor: "series" | "black"; compareLabelFontSize: number; theme: Theme; showTrendLegend: boolean; logScale: boolean; onLogScaleEligibilityChange: (eligible: boolean) => void; onExportReady: (handler: () => Promise<boolean>) => void }) {
   const valueMetric = metric === "followersCumulativeDelta" ? "followers" : metric;
   const goodRows = useMemo(() => currentRows.filter((row) => row.status === "ok" && hasChartMetricValue(row, valueMetric)), [currentRows, valueMetric]);
   const accountMeta = useMemo(() => {
@@ -1004,7 +1040,9 @@ const SimpleChart = memo(function SimpleChart({ mode, metric, chartTitle, chartT
 
   const downloadChartPng = useCallback(async () => {
     const svg = chartRef.current?.querySelector("svg");
-    if (!svg) return;
+    if (!svg) return false;
+    let svgUrl: string | null = null;
+    let pngUrl: string | null = null;
     try {
       const viewBox = svg.viewBox.baseVal;
       const sourceElements = [svg, ...Array.from(svg.querySelectorAll("*"))];
@@ -1028,14 +1066,15 @@ const SimpleChart = memo(function SimpleChart({ mode, metric, chartTitle, chartT
       clonedSvg.setAttribute("viewBox", `${viewBox.x || 0} ${(viewBox.y || 0) - exportTitleTopPadding} ${chartWidth} ${chartHeight}`);
       clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
       const markup = new XMLSerializer().serializeToString(clonedSvg);
-      const objectUrl = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }));
+      svgUrl = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }));
       const image = new Image();
       await new Promise<void>((resolve, reject) => {
         image.onload = () => resolve();
         image.onerror = () => reject(new Error("グラフ画像を作成できませんでした。"));
-        image.src = objectUrl;
+        image.src = svgUrl!;
       });
-      URL.revokeObjectURL(objectUrl);
+      URL.revokeObjectURL(svgUrl);
+      svgUrl = null;
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(chartWidth * pixelRatio);
       canvas.height = Math.round(chartHeight * pixelRatio);
@@ -1046,19 +1085,24 @@ const SimpleChart = memo(function SimpleChart({ mode, metric, chartTitle, chartT
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
       if (!png) throw new Error("PNG画像を作成できませんでした。");
+      const downloadUrl = URL.createObjectURL(png);
+      pngUrl = downloadUrl;
       const link = document.createElement("a");
-      link.href = URL.createObjectURL(png);
+      link.href = downloadUrl;
       link.download = `x-account-stats-${mode}-${metric}.png`;
       link.click();
-      URL.revokeObjectURL(link.href);
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      pngUrl = null;
+      return true;
     } catch {
-      // Image export is best-effort and does not interrupt chart interaction.
+      return false;
+    } finally {
+      if (svgUrl) URL.revokeObjectURL(svgUrl);
+      if (pngUrl) URL.revokeObjectURL(pngUrl);
     }
-  }, [chartTitle, metric, mode, theme]);
-
-  useEffect(() => {
+  }, [chartTitle, metric, mode, theme]);  useEffect(() => {
     onExportReady(downloadChartPng);
-    return () => onExportReady(async () => undefined);
+    return () => onExportReady(async () => false);
   }, [downloadChartPng, onExportReady]);
 
   if (!(mode === "compare" ? chartRows.length : points.length)) return <div className="chart-empty">この条件で表示できるデータがありません。</div>;
@@ -1162,6 +1206,7 @@ export default function Home() {
   const [rows, setRows] = useState<AccountRow[]>([]);
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
   const [latestCollection, setLatestCollection] = useState<LatestCollection | null>(null);
+  const [registeredAccountCount, setRegisteredAccountCount] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -1175,6 +1220,9 @@ export default function Home() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [activeTab, setActiveTab] = useState<DashboardTab>("results");
   const [resultsViewMode, setResultsViewMode] = useState<ResultsViewMode>("table");
+  const [isMobileResults, setIsMobileResults] = useState(false);
+  const [resultsCalendarOpen, setResultsCalendarOpen] = useState(false);
+  const [displayNameEditMode, setDisplayNameEditMode] = useState(false);
   const [topMetric, setTopMetric] = useState<TopMetric>("followers");
   const [topDate, setTopDate] = useState("");
   const [topComparisonDate, setTopComparisonDate] = useState("");
@@ -1228,7 +1276,7 @@ export default function Home() {
   const exportInFlight = useRef(false);
   const chartSelectionInitialized = useRef(false);
   const avatarSyncFingerprint = useRef("");
-  const chartExportRef = useRef<(() => Promise<void>) | null>(null);
+  const chartExportRef = useRef<(() => Promise<boolean>) | null>(null);
   const accountEditorDialogRef = useRef<HTMLDialogElement>(null);
   const accountEditorInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1243,10 +1291,19 @@ export default function Home() {
     }
   }, [isAccountEditorOpen]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 680px)");
+    const updateMobileState = () => setIsMobileResults(mediaQuery.matches);
+    updateMobileState();
+    mediaQuery.addEventListener("change", updateMobileState);
+    return () => mediaQuery.removeEventListener("change", updateMobileState);
+  }, []);
+
   const clearCachedAccountData = useCallback(() => {
     setRows([]);
     setHistoryRows([]);
     setLatestCollection(null);
+    setRegisteredAccountCount(null);
     setAccountInput("");
     setIsAccountEditorOpen(false);
     setAccountEditorDraft("");
@@ -1373,6 +1430,7 @@ export default function Home() {
       if (!response.ok) throw new Error(payload.error ?? "履歴を読み込めませんでした");
       setHistoryRows(payload.rows ?? []);
       setLatestCollection(payload.latestCollection ?? null);
+      setRegisteredAccountCount(typeof payload.registeredAccountCount === "number" && Number.isSafeInteger(payload.registeredAccountCount) && payload.registeredAccountCount >= 0 ? payload.registeredAccountCount : null);
       const latestRunId = payload.runs?.[0]?.id ?? (payload.rows ?? []).reduce((latest, row) => row.fetched_at > latest.fetched_at ? row : latest, { fetched_at: "", run_id: "" }).run_id;
       const latestHistoricalRows = (payload.rows ?? []).filter((row) => row.run_id === latestRunId);
       if (latestHistoricalRows.length) {
@@ -1753,7 +1811,7 @@ export default function Home() {
   const topRows = useMemo(() => rankedTopRows.slice(0, 15), [rankedTopRows]);
 
   const downloadTop15Image = async () => {
-    if (!topRows.length) return;
+    if (!topRows.length) return false;
     setNotice({ tone: "info", message: "ランキング画像を準備しています…" });
     try {
       const width = 1600;
@@ -1899,8 +1957,10 @@ export default function Home() {
       anchor.click();
       URL.revokeObjectURL(url);
       setNotice({ tone: "success", message: "ランキング画像をPNG形式で保存しました。" });
+      return true;
     } catch (error) {
       setNotice({ tone: "error", message: error instanceof Error ? error.message : "TOP15画像を保存できませんでした" });
+      return false;
     }
   };
 
@@ -2101,19 +2161,21 @@ export default function Home() {
     : "最終取得: 取得記録なし";
 
   const accountTargetHandles = normalizeStoredHandleTargets(accountInput).handles;
+  const displayedRegisteredAccountCount = isAdmin && accountTargetsSyncReady ? accountTargetHandles.length : registeredAccountCount;
+  const visibleResultsViewMode = isMobileResults && resultsViewMode === "compact" ? "table" : resultsViewMode;
 
   return (
     <main className="site-shell">
       <header className="topbar editorial-topbar">
-        <div className="brand editorial-brand"><div className="brand-mark editorial-brand-mark" role="img" aria-label="グラフマーク"><span className="brand-bar brand-bar-short" /><span className="brand-bar brand-bar-medium" /><span className="brand-bar brand-bar-tall" /></div><div className="editorial-brand-copy"><p className="brand-name">複垢データベース</p></div></div>
-        <div className="topbar-meta editorial-topbar-meta"><span>公開共有モード</span><button className="theme-toggle editorial-theme-toggle" type="button" onClick={toggleTheme} aria-pressed={theme === "dark"} aria-label={theme === "dark" ? "ライトモードに切り替え" : "ダークモードに切り替え"}><span className="theme-toggle-icon" aria-hidden="true">{theme === "dark" ? "☼" : "◐"}</span><span className="theme-toggle-label">{theme === "dark" ? "ライト" : "ダーク"}</span></button></div>
+        <svg className="brand-graph-decoration" viewBox="0 0 1200 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><g className="brand-graph-bars"><rect x="40" y="65" width="55" height="35" /><rect x="160" y="48" width="55" height="52" /><rect x="280" y="72" width="55" height="28" /><rect x="400" y="38" width="55" height="62" /><rect x="520" y="60" width="55" height="40" /><rect x="640" y="27" width="55" height="73" /><rect x="760" y="54" width="55" height="46" /><rect x="880" y="33" width="55" height="67" /><rect x="1000" y="46" width="55" height="54" /><rect x="1120" y="20" width="55" height="80" /></g><polyline className="brand-graph-line" points="0,76 110,58 230,69 350,32 470,50 590,21 710,42 830,17 950,36 1070,11 1200,25" /></svg>
+        <div className="brand editorial-brand"><div className="editorial-brand-copy"><p className="brand-name">複垢データベース</p></div></div>
+        <div className="topbar-meta editorial-topbar-meta"><button className="theme-toggle editorial-theme-toggle" type="button" onClick={toggleTheme} aria-pressed={theme === "dark"} aria-label={theme === "dark" ? "ライトモードに切り替え" : "ダークモードに切り替え"}><span className="theme-toggle-icon"><ThemeIcon mode={theme} /></span><span className="theme-toggle-label">{theme === "dark" ? "ライト" : "ダーク"}</span></button></div>
       </header>
 
       <section className="hero-section">
         {isAdmin ? <>
           <section className="input-card panel-card">
             <div className="input-footer">
-              <span className="input-count">{formatNumber(accountTargetHandles.length)}件登録</span>
               <div className="input-actions">
                 <button type="button" className="secondary-button" onClick={openAccountEditor}>登録アカウントを編集</button>
                 <button type="button" className="primary-button" onClick={collect} disabled={isLoading || !accountTargetsSyncReady || isAccountTargetsSyncing}>{isLoading ? <><span className="button-spinner" />取得中…</> : isAccountTargetsSyncing ? <><span className="button-spinner" />共有中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button>
@@ -2178,39 +2240,71 @@ export default function Home() {
               </div>
             </div>
           </dialog>
-        </> : readMode === "public" ? <section className="public-readonly-card panel-card"><h2>共有データを閲覧中</h2><p>取得データとグラフは公開されています。アカウント追加とExcel操作は管理者のみ利用できます。</p></section> : <section className="public-readonly-card panel-card"><h2>閲覧には管理者ログインが必要です</h2><p>このサイトは非公開モードです。管理者ログイン後にアカウントデータを表示します。</p></section>}
+        </> : readMode === "public" ? null : <section className="public-readonly-card panel-card"><h2>閲覧には管理者ログインが必要です</h2><p>このサイトは非公開モードです。管理者ログイン後にアカウントデータを表示します。</p></section>}
         {notice && !isAdmin && <div className={`notice notice-${notice.tone}`} role="status"><span>{notice.tone === "success" ? "✓" : notice.tone === "error" ? "!" : "i"}</span>{notice.message}</div>}
       </section>
 
       <section className="summary-grid editorial-summary-grid">
-        <div className="summary-card summary-card--accounts panel-card"><span className="summary-label">取得済みアカウント</span><strong>{formatNumber(successfulRows.length)}</strong><span className="summary-detail">{rows.length ? `${rows.filter((row) => row.status === "error").length}件のエラー` : "取得データを待っています"}</span></div>
+        <div className="summary-card summary-card--accounts panel-card"><span className="summary-label">取得済み / 登録</span><strong>{formatNumber(successfulRows.length)} / {displayedRegisteredAccountCount === null ? "—" : formatNumber(displayedRegisteredAccountCount)}</strong><span className="summary-detail">{rows.length ? `${rows.filter((row) => row.status === "error").length}件のエラー` : "取得データを待っています"}</span></div>
         <div className="summary-card summary-card--followers panel-card"><span className="summary-label">フォロワー合計</span><strong>{formatNumber(totals.followers)}</strong><span className={`summary-detail ${deltaClass(summaryDeltas.followers)}`}>前回比 {formatDelta(summaryDeltas.followers)}</span></div>
         <div className="summary-card summary-card--posts panel-card"><span className="summary-label">投稿数合計</span><strong>{formatNumber(totals.posts)}</strong><span className={`summary-detail ${deltaClass(summaryDeltas.posts)}`}>前回比 {formatDelta(summaryDeltas.posts)}</span></div>
-        <div className="summary-card summary-card--snapshots panel-card"><span className="summary-label">保存スナップショット</span><strong>{formatNumber(new Set(historyRows.map((row) => row.run_id)).size)}</strong><span className="summary-detail">匿名セッション内</span></div>
         {isAdmin && <button className={`fresh-export-button summary-card--export panel-card ${isExporting ? "is-preparing" : ""}`} type="button" onClick={() => void exportWorkbook()} disabled={isExporting || (!historyRows.length && !successfulRows.length)}><span className="export-icon">{isExporting ? <span className="button-spinner export-spinner" aria-hidden="true" /> : "↓"}</span><span><span className="summary-label">{isExporting ? "Excelを準備中…" : "データ出力"}</span><strong>Excelにデータを書き出す</strong></span></button>}
       </section>
 
       <div className="workspace-tabs editorial-workspace-tabs" role="tablist" aria-label="表示切り替え" onKeyDown={(event) => handleTabListKeyDown(event, isAdmin ? (["results", "chart", "historical"] as const) : (["results", "chart"] as const), (value) => setActiveTab(value))}>
         <button id="dashboard-tab-results" type="button" role="tab" aria-selected={activeTab === "results"} aria-controls="dashboard-panel-results" tabIndex={activeTab === "results" ? 0 : -1} className={activeTab === "results" ? "is-active" : ""} onClick={() => setActiveTab("results")}>取得データ</button>
         <button id="dashboard-tab-chart" type="button" role="tab" aria-selected={activeTab === "chart"} aria-controls="dashboard-panel-chart" tabIndex={activeTab === "chart" ? 0 : -1} className={activeTab === "chart" ? "is-active" : ""} onClick={() => setActiveTab("chart")}>グラフ表示</button>
-        {isAdmin && <button id="dashboard-tab-historical" type="button" role="tab" aria-selected={activeTab === "historical"} aria-controls="dashboard-panel-historical" tabIndex={activeTab === "historical" ? 0 : -1} className={activeTab === "historical" ? "is-active" : ""} onClick={() => setActiveTab("historical")}>過去データ追加</button>}
+        {isAdmin && <button id="dashboard-tab-historical" type="button" role="tab" aria-selected={activeTab === "historical"} aria-controls="dashboard-panel-historical" tabIndex={activeTab === "historical" ? 0 : -1} className={activeTab === "historical" ? "is-active" : ""} onClick={() => setActiveTab("historical")}>全履歴編集</button>}
       </div>
 
       <section className="workspace-grid">
-        {activeTab === "results" ? <div key={activeTab} className="table-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-results" aria-labelledby="dashboard-tab-results" tabIndex={0}><div className="section-heading"><div className="results-heading-copy"><h2>取得データ</h2><div className="results-date-status"><span className="results-date-label">表示日: {resultsViewMode === "top10" ? selectedTopDate || "—" : selectedResultDate || "—"}</span><div className="collection-status-meta collection-status-inline"><span>取得元: fxTwitter</span><span>{latestCollectionLabel}</span></div></div></div><div className="results-heading-actions"><StatusFilter selected={statusFilter} onChange={setStatusFilter} /><div className="results-view-tabs" role="tablist" aria-label="取得データの表示形式" onKeyDown={(event) => handleTabListKeyDown(event, ["table", "compact", "top10"] as const, (value) => setResultsViewMode(value))}><button id="results-view-tab-table" type="button" role="tab" aria-selected={resultsViewMode === "table"} aria-controls="results-view-panel-table" tabIndex={resultsViewMode === "table" ? 0 : -1} className={resultsViewMode === "table" ? "is-active" : ""} onClick={() => setResultsViewMode("table")}>通常</button><button id="results-view-tab-compact" type="button" role="tab" aria-selected={resultsViewMode === "compact"} aria-controls="results-view-panel-compact" tabIndex={resultsViewMode === "compact" ? 0 : -1} className={resultsViewMode === "compact" ? "is-active" : ""} onClick={() => setResultsViewMode("compact")}>コンパクト</button><button id="results-view-tab-top10" type="button" role="tab" aria-selected={resultsViewMode === "top10"} aria-controls="results-view-panel-top10" tabIndex={resultsViewMode === "top10" ? 0 : -1} className={resultsViewMode === "top10" ? "is-active" : ""} onClick={() => setResultsViewMode("top10")}>ランキング</button></div></div></div>{resultsViewMode !== "top10" && <DateCalendar key={selectedResultDate} availableDates={resultAvailableDates} selectedDate={selectedResultDate} onDateChange={setResultDate} />}{resultsViewMode === "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" tabIndex={0}><ResultsTable rows={visibleResultRows} onSort={handleSort} sortKey={sortKey} direction={sortDirection} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} onDisplayNameChange={updateDisplayName} /></div>}{resultsViewMode !== "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" hidden />}{resultsViewMode === "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" tabIndex={0}><CompactResults rows={visibleResultRows} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} /></div>}{resultsViewMode !== "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" hidden />}{resultsViewMode === "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" tabIndex={0}><TopResults rows={rankingRows} topMetric={topMetric} onTopMetricChange={setTopMetric} previousByAccount={topPreviousByAccount} displayNameOverrides={displayNameOverrides} onDownloadImage={downloadTop15Image} availableDates={topAvailableDates} selectedDate={selectedTopDate} onDateChange={setTopDate} comparisonTargetDate={topComparisonTargetDate} onComparisonDateChange={setTopComparisonDate} expanded={topExpanded} onToggleExpanded={() => setTopExpanded((current) => !current)} /></div>}{resultsViewMode !== "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" hidden />}</div> : activeTab === "chart" ? <div key={activeTab} className="chart-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-chart" aria-labelledby="dashboard-tab-chart" tabIndex={0}><div className="section-heading"><div><h2>グラフ表示</h2></div><div className="mode-switch" role="tablist" aria-label="グラフモード" onKeyDown={(event) => handleTabListKeyDown(event, ["compare", "trend"] as const, (value) => setChartMode(value))}><button id="chart-mode-tab-compare" aria-controls="chart-mode-panel-compare" tabIndex={chartMode === "compare" ? 0 : -1} role="tab" aria-selected={chartMode === "compare"} className={chartMode === "compare" ? "is-active" : ""} type="button" onClick={() => setChartMode("compare")}>比較</button><button id="chart-mode-tab-trend" aria-controls="chart-mode-panel-trend" tabIndex={chartMode === "trend" ? 0 : -1} role="tab" aria-selected={chartMode === "trend"} className={chartMode === "trend" ? "is-active" : ""} type="button" onClick={() => setChartMode("trend")}>推移</button></div></div>
-          <div className={`chart-controls chart-controls-primary ${chartMode === "trend" ? "chart-controls-unified" : ""}`}>
-            <label className="chart-title-control"><span>グラフタイトル</span><input type="text" value={chartTitle} onChange={(event) => setChartTitle(event.target.value)} placeholder="任意のタイトル" /></label><label><span>タイトル文字サイズ（pt）</span><input type="number" min="6" max="24" step="0.5" value={chartTitleFontSize} onChange={(event) => setChartTitleFontSize(Math.min(24, Math.max(6, Number(event.target.value) || 6)))} /></label>
-            <label><span>指標</span><select value={effectiveChartMetric} onChange={(event) => setMetric(event.target.value as ChartMetric)}>{Object.entries(chartMetricLabels).map(([key, label]) => <option key={key} value={key} disabled={(chartMode === "trend" && (isChartDeltaMetric(key as ChartMetric) || key === "postsPerFollower")) || (chartMode === "compare" && key === "followersCumulativeDelta")}>{label}</option>)}</select></label>
-            {chartMode === "trend" && <><label><span>集計単位</span><select value={granularity} onChange={(event) => setGranularity(event.target.value as Granularity)}><option value="day">日次</option><option value="week">週次</option><option value="month">月次</option></select></label><label><span>日付表示</span><select value={dateFormat} onChange={(event) => setDateFormat(event.target.value as "short" | "month" | "full")}><option value="short">月日</option><option value="month">年月</option><option value="full">年月日</option></select></label><label><span>期間（開始）</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label><label><span>期間（終了）</span><input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label><label><span>表示アカウント</span><span className="selection-count">{selectedHandles.length}件選択</span></label></>}
-            <span className="chart-control-spacer" /><button type="button" className="secondary-button chart-export-button" onClick={() => void chartExportRef.current?.()}>画像を保存</button>
+        {activeTab === "results" ? <div key={activeTab} className="table-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-results" aria-labelledby="dashboard-tab-results" tabIndex={0}>
+          <div className="section-heading"><div className="results-heading-copy"><h2>取得データ</h2></div><div className="results-heading-actions"><StatusFilter selected={statusFilter} onChange={setStatusFilter} /><div className="results-view-tabs" role="tablist" aria-label="取得データの表示形式" onKeyDown={(event) => handleTabListKeyDown(event, isMobileResults ? ["table", "top10"] as const : ["table", "compact", "top10"] as const, (value) => setResultsViewMode(value))}><button id="results-view-tab-table" type="button" role="tab" aria-selected={visibleResultsViewMode === "table"} aria-controls="results-view-panel-table" tabIndex={visibleResultsViewMode === "table" ? 0 : -1} className={visibleResultsViewMode === "table" ? "is-active" : ""} onClick={() => setResultsViewMode("table")}>通常</button>{!isMobileResults && <button id="results-view-tab-compact" type="button" role="tab" aria-selected={visibleResultsViewMode === "compact"} aria-controls="results-view-panel-compact" tabIndex={visibleResultsViewMode === "compact" ? 0 : -1} className={visibleResultsViewMode === "compact" ? "is-active" : ""} onClick={() => setResultsViewMode("compact")}>コンパクト</button>}<button id="results-view-tab-top10" type="button" role="tab" aria-selected={visibleResultsViewMode === "top10"} aria-controls="results-view-panel-top10" tabIndex={visibleResultsViewMode === "top10" ? 0 : -1} className={visibleResultsViewMode === "top10" ? "is-active" : ""} onClick={() => setResultsViewMode("top10")}>ランキング</button></div></div></div>
+          {visibleResultsViewMode !== "top10" ? <div className="results-control-row">
+            <div className="results-date-control"><button type="button" className="calendar-toggle" onClick={() => setResultsCalendarOpen((open) => !open)} aria-expanded={resultsCalendarOpen} aria-label={resultsCalendarOpen ? "取得日のカレンダーを閉じる" : "取得日のカレンダーを開く"} disabled={!resultAvailableDates.length}><CalendarIcon /></button><span className="calendar-toggle-label">日付変更</span><div className="results-date-copy"><strong>{selectedResultDate || "—"}</strong><span className="collection-status-inline">{latestCollectionLabel}</span></div></div>
+            {visibleResultsViewMode === "table" && <button type="button" className={`secondary-button display-name-edit-toggle ${displayNameEditMode ? "is-active" : ""}`} onClick={() => setDisplayNameEditMode((editing) => !editing)} aria-pressed={displayNameEditMode} aria-label={displayNameEditMode ? "表示名の編集を終了" : "表示名を編集"}><PencilIcon /><span>編集</span></button>}
+          </div> : null}
+          {visibleResultsViewMode !== "top10" && resultsCalendarOpen && <div className="results-calendar-panel"><DateCalendar key={selectedResultDate} headingLabel="取得日" availableDates={resultAvailableDates} selectedDate={selectedResultDate} onDateChange={(date) => setResultDate(date)} /></div>}
+          {visibleResultsViewMode === "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" tabIndex={0}><ResultsTable rows={visibleResultRows} onSort={handleSort} sortKey={sortKey} direction={sortDirection} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} onDisplayNameChange={updateDisplayName} displayNameEditMode={displayNameEditMode} /></div>}
+          {visibleResultsViewMode !== "table" && <div id="results-view-panel-table" role="tabpanel" aria-labelledby="results-view-tab-table" hidden />}
+          {!isMobileResults && resultsViewMode === "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" tabIndex={0}><CompactResults rows={visibleResultRows} previousByAccount={resultPreviousByAccount} displayNameOverrides={displayNameOverrides} /></div>}
+          {!isMobileResults && resultsViewMode !== "compact" && <div id="results-view-panel-compact" role="tabpanel" aria-labelledby="results-view-tab-compact" hidden />}
+          {visibleResultsViewMode === "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" tabIndex={0}><TopResults rows={rankingRows} topMetric={topMetric} onTopMetricChange={setTopMetric} previousByAccount={topPreviousByAccount} displayNameOverrides={displayNameOverrides} onDownloadImage={downloadTop15Image} availableDates={topAvailableDates} selectedDate={selectedTopDate} onDateChange={setTopDate} comparisonTargetDate={topComparisonTargetDate} onComparisonDateChange={setTopComparisonDate} expanded={topExpanded} onToggleExpanded={() => setTopExpanded((current) => !current)} latestCollectionLabel={latestCollectionLabel} /></div>}
+          {visibleResultsViewMode !== "top10" && <div id="results-view-panel-top10" role="tabpanel" aria-labelledby="results-view-tab-top10" hidden />}
+        </div> : activeTab === "chart" ? <div key={activeTab} className="chart-panel panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-chart" aria-labelledby="dashboard-tab-chart" tabIndex={0}><div className="section-heading"><div><h2>グラフ表示</h2></div><div className="mode-switch" role="tablist" aria-label="グラフモード" onKeyDown={(event) => handleTabListKeyDown(event, ["compare", "trend"] as const, (value) => setChartMode(value))}><button id="chart-mode-tab-compare" aria-controls="chart-mode-panel-compare" tabIndex={chartMode === "compare" ? 0 : -1} role="tab" aria-selected={chartMode === "compare"} className={chartMode === "compare" ? "is-active" : ""} type="button" onClick={() => setChartMode("compare")}>比較</button><button id="chart-mode-tab-trend" aria-controls="chart-mode-panel-trend" tabIndex={chartMode === "trend" ? 0 : -1} role="tab" aria-selected={chartMode === "trend"} className={chartMode === "trend" ? "is-active" : ""} type="button" onClick={() => setChartMode("trend")}>推移</button></div></div>
+          <div className={`chart-controls chart-controls-primary chart-controls-summary ${chartMode === "trend" ? "is-trend" : ""}`}>
+            <div className={`chart-date-pair ${chartMode === "trend" ? "chart-date-pair-range" : ""}`}>
+              {chartMode === "compare" ? isChartDeltaMetric(effectiveChartMetric)
+                ? <><ChartDatePicker headingLabel="比較日（引く数）" availableDates={chartMetricDates.filter((date) => date < selectedCompareDate)} selectedDate={selectedChartComparisonDate} onDateChange={setChartComparisonDate} /><ChartDatePicker headingLabel="表示日" availableDates={chartMetricDates} selectedDate={selectedCompareDate} onDateChange={setCompareDate} /></>
+                : <ChartDatePicker headingLabel="比較日" availableDates={chartMetricDates} selectedDate={selectedCompareDate} onDateChange={setCompareDate} />
+                : <><ChartDatePicker headingLabel="期間（開始）" availableDates={chartMetricDates} selectedDate={startDate} onDateChange={setStartDate} clearable /><ChartDatePicker headingLabel="期間（終了）" availableDates={chartMetricDates} selectedDate={endDate} onDateChange={setEndDate} clearable /></>}
+            </div>
+            <div className="chart-selection-summary"><span>表示アカウント</span><strong>{selectedChartHandles.length}件選択</strong></div>
+            <ImageShareMenu buttonClassName="secondary-button chart-export-button" containerClassName="chart-export-control" onDownload={() => chartExportRef.current?.() ?? Promise.resolve(false)} />
           </div>
-          {chartMode === "compare" && <div className="chart-controls chart-controls-secondary"><div className="chart-date-pair">{isChartDeltaMetric(effectiveChartMetric) ? <><DateCalendar key={`chart-comparison-${selectedChartComparisonDate}`} headingLabel="比較日（引く数）" size="small" availableDates={chartMetricDates.filter((date) => date < selectedCompareDate)} selectedDate={selectedChartComparisonDate} onDateChange={setChartComparisonDate} /><DateCalendar key={`chart-display-${selectedCompareDate}`} headingLabel="表示日（引かれる数）" size="small" availableDates={chartMetricDates} selectedDate={selectedCompareDate} onDateChange={setCompareDate} /></> : <DateCalendar key={`chart-display-${selectedCompareDate}`} headingLabel="比較日" size="small" availableDates={chartMetricDates} selectedDate={selectedCompareDate} onDateChange={setCompareDate} />}</div><label><span>表示アカウント</span><span className="selection-count">{selectedHandles.length}件選択</span></label></div>}
           <div className="chart-settings-grid">
+            {chartMode === "compare" && <ChartSettingDisclosure title="棒グラフの表示設定">
+              <div className="axis-settings chart-style-settings chart-primary-settings">
+                <label className="chart-title-control"><span>グラフタイトル</span><input type="text" value={chartTitle} onChange={(event) => setChartTitle(event.target.value)} placeholder="任意のタイトル" /></label>
+                <label><span>タイトル文字サイズ（pt）</span><input type="number" min="6" max="24" step="0.5" value={chartTitleFontSize} onChange={(event) => setChartTitleFontSize(Math.min(24, Math.max(6, Number(event.target.value) || 6)))} /></label>
+                <label><span>指標</span><select value={effectiveChartMetric} onChange={(event) => setMetric(event.target.value as ChartMetric)}>{Object.entries(chartMetricLabels).map(([key, label]) => <option key={key} value={key} disabled={key === "followersCumulativeDelta"}>{label}</option>)}</select></label>
+                <label><span>ハンドル名サイズ</span><input type="number" min="5" max="16" step="0.5" value={compareLabelFontSize} onChange={(event) => setCompareLabelFontSize(Math.min(16, Math.max(5, Number(event.target.value) || 5)))} /></label>
+                <label><span>棒グラフの色</span><input type="color" value={effectiveBarColor} onChange={(event) => setBarColor(event.target.value)} aria-label="棒グラフの色" /></label>
+              </div>
+            </ChartSettingDisclosure>}
+            {chartMode === "trend" && <ChartSettingDisclosure title="レイアウトの設定">
+              <div className="axis-settings chart-style-settings chart-primary-settings">
+                <label className="chart-title-control"><span>グラフタイトル</span><input type="text" value={chartTitle} onChange={(event) => setChartTitle(event.target.value)} placeholder="任意のタイトル" /></label>
+                <label><span>タイトル文字サイズ（pt）</span><input type="number" min="6" max="24" step="0.5" value={chartTitleFontSize} onChange={(event) => setChartTitleFontSize(Math.min(24, Math.max(6, Number(event.target.value) || 6)))} /></label>
+                <label><span>指標</span><select value={effectiveChartMetric} onChange={(event) => setMetric(event.target.value as ChartMetric)}>{Object.entries(chartMetricLabels).map(([key, label]) => <option key={key} value={key} disabled={isChartDeltaMetric(key as ChartMetric) || key === "postsPerFollower"}>{label}</option>)}</select></label>
+                <label><span>集計単位</span><select value={granularity} onChange={(event) => setGranularity(event.target.value as Granularity)}><option value="day">日次</option><option value="week">週次</option><option value="month">月次</option></select></label>
+                <label><span>日付表示</span><select value={dateFormat} onChange={(event) => setDateFormat(event.target.value as "short" | "month" | "full")}><option value="short">月日</option><option value="month">年月</option><option value="full">年月日</option></select></label>
+              </div>
+            </ChartSettingDisclosure>}
             <ChartSettingDisclosure title="数値軸の設定" detail="Enterで反映">
-            <div className="axis-settings"><div className="axis-title">数値軸の設定 <span className="axis-commit-help">Enterで反映</span></div><label><span>軸の種類</span><select value={logScale && logScaleEligible ? "log" : "linear"} disabled={!logScaleEligible} onChange={(event) => setLogScale(event.target.value === "log")}><option value="linear">線形軸</option><option value="log">対数軸</option></select></label>{!logScaleEligible && <span className="axis-commit-help">表示中の値がすべて正のとき利用できます</span>}<label><span>最小値</span><input inputMode="numeric" placeholder="自動" value={yMinInput} onChange={(event) => setYMinInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYMin(event.currentTarget.value); } }} /></label><label><span>最大値</span><input inputMode="numeric" placeholder="自動" value={yMaxInput} onChange={(event) => setYMaxInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYMax(event.currentTarget.value); } }} /></label><label><span>主目盛間隔</span><input inputMode="numeric" placeholder="自動" value={yStepInput} onChange={(event) => setYStepInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYStep(event.currentTarget.value); } }} /></label><label><span>補助目盛間隔</span><input inputMode="numeric" placeholder="自動" value={yMinorStepInput} onChange={(event) => setYMinorStepInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYMinorStep(event.currentTarget.value); } }} /></label><label className="toggle-field"><input type="checkbox" checked={compactNumbers} onChange={(event) => setCompactNumbers(event.target.checked)} /><span>省略表記</span></label></div>
-          </ChartSettingDisclosure>
-          {chartMode === "compare" && <ChartSettingDisclosure title="棒グラフの表示設定"><div className="axis-settings chart-style-settings"><div className="axis-title">棒グラフの表示設定</div><label><span>ハンドル名サイズ</span><input type="number" min="5" max="16" step="0.5" value={compareLabelFontSize} onChange={(event) => setCompareLabelFontSize(Math.min(16, Math.max(5, Number(event.target.value) || 5)))} /></label><label><span>棒グラフの色</span><input type="color" value={effectiveBarColor} onChange={(event) => setBarColor(event.target.value)} aria-label="棒グラフの色" /></label></div></ChartSettingDisclosure>}
-          {chartMode === "trend" && <ChartSettingDisclosure title="折れ線の設定"><div className="axis-settings chart-style-settings"><div className="axis-title">折れ線の設定</div><label><span>線の太さ</span><input type="number" min="1" max="8" step="0.1" value={trendLineWidth} onChange={(event) => setTrendLineWidth(Math.min(8, Math.max(1, Number(event.target.value) || 1)))} /></label><label><span>マーカーの大きさ</span><input type="number" min="0" max="8" step="0.1" value={markerSize} onChange={(event) => setMarkerSize(Math.min(8, Math.max(0, Number(event.target.value) || 0)))} /></label><label><span>マーカー外枠の太さ</span><input type="number" min="0" max="5" step="0.1" value={markerOutlineWidth} onChange={(event) => setMarkerOutlineWidth(Math.min(5, Math.max(0, Number(event.target.value) || 0)))} /></label><label><span>数値データのサイズ</span><input type="number" min="0" max="24" step="0.1" value={trendValueFontSize} onChange={(event) => setTrendValueFontSize(Math.min(24, Math.max(0, Number(event.target.value) || 0)))} /></label><label><span>数値軸の文字サイズ</span><input type="number" min="1" max="24" step="0.1" value={trendAxisFontSize} onChange={(event) => setTrendAxisFontSize(Math.min(24, Math.max(1, Number(event.target.value) || 1)))} /></label><label><span>日付軸の文字サイズ</span><input type="number" min="1" max="24" step="0.1" value={trendDateFontSize} onChange={(event) => setTrendDateFontSize(Math.min(24, Math.max(1, Number(event.target.value) || 1)))} /></label><label><span>数値データの色</span><select value={trendValueLabelColor} onChange={(event) => setTrendValueLabelColor(event.target.value as "series" | "black")}><option value="series">アカウント色</option><option value="black">黒一色</option></select></label><label><span>マーカー外枠色</span><input type="color" value={markerOutlineColor} onChange={(event) => setMarkerOutlineColor(event.target.value)} /></label><label className="toggle-field"><input type="checkbox" checked={showTrendLegend} onChange={(event) => setShowTrendLegend(event.target.checked)} /><span>凡例を表示</span></label></div></ChartSettingDisclosure>}
+              <div className="axis-settings"><div className="axis-title">数値軸の設定 <span className="axis-commit-help">Enterで反映</span></div><label><span>軸の種類</span><select value={logScale && logScaleEligible ? "log" : "linear"} disabled={!logScaleEligible} onChange={(event) => setLogScale(event.target.value === "log")}><option value="linear">線形軸</option><option value="log">対数軸</option></select></label>{!logScaleEligible && <span className="axis-commit-help">表示中の値がすべて正のとき利用できます</span>}<label><span>最小値</span><input inputMode="numeric" placeholder="自動" value={yMinInput} onChange={(event) => setYMinInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYMin(event.currentTarget.value); } }} /></label><label><span>最大値</span><input inputMode="numeric" placeholder="自動" value={yMaxInput} onChange={(event) => setYMaxInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYMax(event.currentTarget.value); } }} /></label><label><span>主目盛間隔</span><input inputMode="numeric" placeholder="自動" value={yStepInput} onChange={(event) => setYStepInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYStep(event.currentTarget.value); } }} /></label><label><span>補助目盛間隔</span><input inputMode="numeric" placeholder="自動" value={yMinorStepInput} onChange={(event) => setYMinorStepInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setYMinorStep(event.currentTarget.value); } }} /></label><label className="toggle-field"><input type="checkbox" checked={compactNumbers} onChange={(event) => setCompactNumbers(event.target.checked)} /><span>省略表記</span></label></div>
+            </ChartSettingDisclosure>
+            {chartMode === "trend" && <ChartSettingDisclosure title="折れ線の設定"><div className="axis-settings chart-style-settings"><div className="axis-title">折れ線の設定</div><label><span>線の太さ</span><input type="number" min="1" max="8" step="0.1" value={trendLineWidth} onChange={(event) => setTrendLineWidth(Math.min(8, Math.max(1, Number(event.target.value) || 1)))} /></label><label><span>マーカーの大きさ</span><input type="number" min="0" max="8" step="0.1" value={markerSize} onChange={(event) => setMarkerSize(Math.min(8, Math.max(0, Number(event.target.value) || 0)))} /></label><label><span>マーカー外枠の太さ</span><input type="number" min="0" max="5" step="0.1" value={markerOutlineWidth} onChange={(event) => setMarkerOutlineWidth(Math.min(5, Math.max(0, Number(event.target.value) || 0)))} /></label><label><span>数値データのサイズ</span><input type="number" min="0" max="24" step="0.1" value={trendValueFontSize} onChange={(event) => setTrendValueFontSize(Math.min(24, Math.max(0, Number(event.target.value) || 0)))} /></label><label><span>数値軸の文字サイズ</span><input type="number" min="1" max="24" step="0.1" value={trendAxisFontSize} onChange={(event) => setTrendAxisFontSize(Math.min(24, Math.max(1, Number(event.target.value) || 1)))} /></label><label><span>日付軸の文字サイズ</span><input type="number" min="1" max="24" step="0.1" value={trendDateFontSize} onChange={(event) => setTrendDateFontSize(Math.min(24, Math.max(1, Number(event.target.value) || 1)))} /></label><label><span>数値データの色</span><select value={trendValueLabelColor} onChange={(event) => setTrendValueLabelColor(event.target.value as "series" | "black")}><option value="series">アカウント色</option><option value="black">黒一色</option></select></label><label><span>マーカー外枠色</span><input type="color" value={markerOutlineColor} onChange={(event) => setMarkerOutlineColor(event.target.value)} /></label><label className="toggle-field"><input type="checkbox" checked={showTrendLegend} onChange={(event) => setShowTrendLegend(event.target.checked)} /><span>凡例を表示</span></label></div></ChartSettingDisclosure>}
           </div>
           <div key={chartRenderKey} className="chart-result-frame" id={"chart-mode-panel-" + chartMode} role="tabpanel" aria-labelledby={"chart-mode-tab-" + chartMode} tabIndex={0} data-transition-key={chartRenderKey}><SimpleChart mode={chartMode} metric={effectiveChartMetric} chartTitle={chartTitle} chartTitleFontSize={chartTitleFontSize} currentRows={successfulRows} historyRows={chartHistoryRows} selectedHandles={selectedChartHandles} compareDate={selectedCompareDate} comparisonDate={selectedChartComparisonDate} startDate={startDate} endDate={endDate} granularity={granularity} dateFormat={dateFormat} yMin={yMin} yMax={yMax} yStep={yStep} yMinorStep={yMinorStep} compactNumbers={compactNumbers} compareOrientation={compareOrientation} displayNameOverrides={displayNameOverrides} legendColors={legendColors} barColor={effectiveBarColor} trendLineWidth={trendLineWidth} markerSize={markerSize} markerOutlineWidth={markerOutlineWidth} markerOutlineColor={markerOutlineColor} trendValueFontSize={trendValueFontSize} trendAxisFontSize={trendAxisFontSize} trendDateFontSize={trendDateFontSize} trendValueLabelColor={trendValueLabelColor} compareLabelFontSize={compareLabelFontSize} theme={theme} showTrendLegend={showTrendLegend} logScale={logScale} onLogScaleEligibilityChange={(eligible) => setLogScaleEligible((current) => current === eligible ? current : eligible)} onExportReady={(handler) => { chartExportRef.current = handler; }} /></div>{chartMode !== "compare" && <div id="chart-mode-panel-compare" role="tabpanel" aria-labelledby="chart-mode-tab-compare" hidden />}{chartMode !== "trend" && <div id="chart-mode-panel-trend" role="tabpanel" aria-labelledby="chart-mode-tab-trend" hidden />}
           <ChartSettingDisclosure title="表示アカウント" detail={selectedChartHandles.length + "件選択"}>
@@ -2252,7 +2346,7 @@ export default function Home() {
         {isAdmin && activeTab !== "historical" && <div id="dashboard-panel-historical" role="tabpanel" aria-labelledby="dashboard-tab-historical" hidden />}
       </section>
 
-      <footer className="site-footer"><span className="site-version">{siteVersion}</span>{historyError && <span>履歴: {historyError}</span>}<span className="admin-access-area">{isAdmin ? <button type="button" className="text-button" onClick={() => void logoutAdmin()}>管理者ログアウト</button> : <button type="button" className="text-button" onClick={() => setAdminLoginOpen((current) => !current)}>管理者ログイン</button>}{adminLoginOpen && !isAdmin && <span className="admin-login-box"><input type="password" value={adminKeyInput} onChange={(event) => { setAdminKeyInput(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void loginAdmin(); } }} placeholder="管理者キー" aria-label="管理者キー" /><button type="button" className="secondary-button" onClick={() => void loginAdmin()} disabled={isAdminLoggingIn}>{isAdminLoggingIn ? "確認中…" : "認証"}</button></span>}</span></footer>
+      <footer className="site-footer"><span className="site-version">{siteVersion}</span><span className="footer-source">取得元: fxTwitter</span>{historyError && <span>履歴: {historyError}</span>}<span className="admin-access-area">{isAdmin ? <button type="button" className="text-button" onClick={() => void logoutAdmin()}>管理者ログアウト</button> : <button type="button" className="text-button" onClick={() => setAdminLoginOpen((current) => !current)}>管理者ログイン</button>}{adminLoginOpen && !isAdmin && <span className="admin-login-box"><input type="password" value={adminKeyInput} onChange={(event) => { setAdminKeyInput(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void loginAdmin(); } }} placeholder="管理者キー" aria-label="管理者キー" /><button type="button" className="secondary-button" onClick={() => void loginAdmin()} disabled={isAdminLoggingIn}>{isAdminLoggingIn ? "確認中…" : "認証"}</button></span>}</span></footer>
     </main>
   );
 }

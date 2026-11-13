@@ -17,6 +17,7 @@ export async function GET(request: Request) {
       runs: [],
       rows: [],
       latestCollection: null,
+      registeredAccountCount: 0,
     }, { status: 500 });
   }
 }

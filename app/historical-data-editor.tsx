@@ -341,10 +341,10 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
 
   const editorBusy = isLoading || isSaving || Boolean(uploadingAvatarKey);
 
-  return <div className="historical-editor panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-historical" aria-labelledby="dashboard-tab-historical" tabIndex={0} aria-label="過去データ追加" aria-busy={editorBusy}>
+  return <div className="historical-editor panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-historical" aria-labelledby="dashboard-tab-historical" tabIndex={0} aria-label="全履歴編集" aria-busy={editorBusy}>
     <div className="section-heading historical-editor-toolbar">
       <div>
-        <h2>過去データ追加</h2>
+        <h2>全履歴編集</h2>
         <p className="historical-editor-help">Excelの日次履歴と同じ形式です。日付・アカウント・数値を管理者が編集できます。</p>
       </div>
       <div className="historical-editor-actions"><button type="button" className="secondary-button" onClick={() => void load(metric)} disabled={editorBusy} aria-busy={isLoading}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "再読み込み"}</button><button type="button" className="primary-button" onClick={() => void save()} disabled={editorBusy} aria-busy={isSaving}>{isSaving ? <><span className="button-spinner" aria-hidden="true" />保存中…</> : "変更を保存"}</button></div>
