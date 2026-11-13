@@ -236,6 +236,26 @@ try {
   assert.equal(await first.getAttribute("readonly"), "");
   await second.click({modifiers:["Shift"]});
   assert.equal(await page.locator("td.grid-selected").count(),2);
+  for (const reverse of [false,true]) {
+    await first.scrollIntoViewIfNeeded();
+    const start = await (reverse ? second : first).locator("xpath=..").boundingBox();
+    const finish = await (reverse ? first : second).boundingBox();
+    await page.mouse.move(start.x + 2, start.y + start.height/2);
+    await page.mouse.down();
+    await page.mouse.move(finish.x + finish.width/2,finish.y + finish.height/2,{steps:1});
+    await page.mouse.up();
+    assert.equal(await page.locator("td.grid-selected").count(),2,"fast mouse drag must select adjacent cells in either direction");
+  }
+  await first.click();
+  const outsideStart=await first.boundingBox();
+  await page.mouse.move(outsideStart.x+outsideStart.width/2,outsideStart.y+outsideStart.height/2);
+  await page.mouse.down();
+  await page.mouse.move(5,5);
+  await page.mouse.up();
+  await second.hover();
+  assert.equal(await first.evaluate(input=>input.hasPointerCapture(1)),false,"outside release must end capture");
+  await first.click();
+  await second.click({modifiers:["Shift"]});
   const copied = await first.evaluate(input => {
     const data = new DataTransfer();
     input.dispatchEvent(new ClipboardEvent("copy",{bubbles:true,cancelable:true,clipboardData:data}));
