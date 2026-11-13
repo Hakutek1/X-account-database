@@ -14,6 +14,7 @@ export default function HistoricalNumberGrid({children, columns, onUpdateCell}: 
  return <><p className="historical-scroll-hint">クリックでセル選択・ドラッグまたはShiftで範囲選択。ダブルクリックで編集。選択中はコピー・貼り付け・Deleteが使えます。</p><p role="alert">{error}</p><div ref={root}
  onPointerDownCapture={e=>{const input=locate(e.target);if(!input||!input.readOnly)return;e.preventDefault();const i=inputs().indexOf(input);if(!e.shiftKey)anchor.current=i;end.current=i;input.focus();paint();}}
  onPointerOver={e=>{if(e.buttons!==1)return;const input=locate(e.target);if(!input||!input.readOnly)return;end.current=inputs().indexOf(input);paint();}}
+ onFocusCapture={e=>{const input=locate(e.target);if(!input||!input.readOnly)return;const i=inputs().indexOf(input);if(i!==end.current){anchor.current=i;end.current=i;}paint();}}
  onDoubleClick={e=>{const input=locate(e.target);if(!input)return;input.readOnly=false;input.focus();input.select();}}
  onBlurCapture={e=>{const input=locate(e.target);if(input)input.readOnly=true;}}
  onCopy={e=>{const input=locate(e.target);if(!input||!input.readOnly)return;const list=inputs(),b=bounds(),rows=[];for(let r=b.top;r<=b.bottom;r++){const row=[];for(let c=b.left;c<=b.right;c++)row.push(list[r*columns+c].value);rows.push(row.join("\t"));}e.preventDefault();e.clipboardData.setData("text/plain",rows.join("\n"));}}
