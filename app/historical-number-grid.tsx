@@ -11,7 +11,7 @@ export default function HistoricalNumberGrid({children, columns, onUpdateCell}: 
  const locate=(target:EventTarget|null)=> target instanceof Element ? target.closest<HTMLInputElement>(".historical-number-input"):null;
  const write=(input:HTMLInputElement,value:string)=>{input.value=value;onUpdateCell(input.dataset.accountKey!,input.dataset.date!,value);};
  const selected=()=>{const b=bounds();return inputs().filter((_,i)=>Math.floor(i/columns)>=b.top&&Math.floor(i/columns)<=b.bottom&&i%columns>=b.left&&i%columns<=b.right);};
- return <><p className="historical-scroll-hint">クリックでセル選択・ドラッグまたはShiftで範囲選択。ダブルクリックで編集。選択中はコピー・貼り付け・Deleteが使えます。</p><p role="alert">{error}</p><div ref={root}
+ return <><p className="historical-grid-help">クリックでセル選択・ドラッグまたはShiftで範囲選択。ダブルクリックで編集。選択中はコピー・貼り付け・Deleteが使えます。</p><p role="alert">{error}</p><div ref={root}
  onPointerDownCapture={e=>{const input=locate(e.target);if(!input||!input.readOnly)return;e.preventDefault();const i=inputs().indexOf(input);if(!e.shiftKey)anchor.current=i;end.current=i;input.focus();paint();}}
  onPointerOver={e=>{if(e.buttons!==1)return;const input=locate(e.target);if(!input||!input.readOnly)return;end.current=inputs().indexOf(input);paint();}}
  onFocusCapture={e=>{const input=locate(e.target);if(!input||!input.readOnly)return;const i=inputs().indexOf(input);if(i!==end.current){anchor.current=i;end.current=i;}paint();}}
