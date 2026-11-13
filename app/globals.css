@@ -1730,3 +1730,9 @@ html[data-theme="dark"] .chart-panel .chart-setting-disclosure .chart-style-sett
   .editorial-brand-copy { gap: 2px; }
   .editorial-brand .brand-subtitle { font-size: .48rem; letter-spacing: .1em; }
 }
+
+/* Spreadsheet selection is limited to historical numeric values. */
+.historical-grid td.grid-selected { background: color-mix(in srgb, var(--accent, #76d6d1) 20%, transparent); }
+.historical-grid td.grid-anchor { outline: 2px solid #76d6d1; outline-offset: -2px; }
+.historical-number-input[readonly] { cursor: cell; user-select: none; }
+.historical-number-input:not([readonly]) { outline: 2px solid #76d6d1; }
