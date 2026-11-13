@@ -1,7 +1,7 @@
 import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin } from "../_shared";
 import { MAX_ACCOUNTS, parseInputs } from "../../../lib/x-stats";
 import { collectForSession } from "../../../lib/collection";
-import { ensureAccountStatuses, loadAccountJoinedMap, loadAccountStatusMap } from "../../../lib/account-status";
+import { ensureAccountStatuses, loadAccountFreezeDateMap, loadAccountJoinedMap, loadAccountStatusMap } from "../../../lib/account-status";
 import { ensureDailyHistory, ensureDailyPostsThroughToday, ensureOpeningDateHistory } from "../../../lib/daily-history";
 
 export async function POST(request: Request) {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const db = getD1();
     await ensureSharedSession(db);
     const fetchedAt = new Date().toISOString();
-    const { runId, results, errors } = await collectForSession({
+    const { runId, results, errors, unfrozenAccounts } = await collectForSession({
       db,
       sessionId: session.id,
       handles: limitedHandles,
@@ -41,12 +41,14 @@ export async function POST(request: Request) {
     await pruneSessionHistory(db, session.id);
     const statusById = await loadAccountStatusMap(db, session.id);
     const joinedById = await loadAccountJoinedMap(db, session.id);
+    const freezeDateById = await loadAccountFreezeDateMap(db, session.id);
 
     const response = json({
       runId,
       fetchedAt,
+      unfrozenAccounts,
       rows: [
-        ...results.map((result) => ({ ...result, joined: joinedById.get(result.id) ?? result.joined, accountStatus: statusById.get(result.id) ?? "active", status: "ok" as const })),
+        ...results.map((result) => ({ ...result, joined: joinedById.get(result.id) ?? result.joined, freezeDate: (freezeDateById.get(result.id) ?? null), accountStatus: statusById.get(result.id) ?? "active", status: "ok" as const })),
         ...errors.map((error) => ({ id: `error:${error.handle}`, handle: error.handle, displayName: "取得失敗", avatarUrl: null, followers: null, following: null, posts: null, joined: null, fetchedAt: error.fetchedAt, accountStatus: "active" as const, status: "error" as const, error: error.error })),
       ],
       warnings: [

@@ -12,7 +12,7 @@ function fakeDatabase({ openingDates = [], identities = [], dailyRows = [], snap
         const bound = {
           bindArgs: args,
           all: async () => {
-            if (sql.includes("joined_at FROM xstats_account_statuses")) return { results: openingDates };
+            if (sql.includes("joined_at") && sql.includes("FROM xstats_account_statuses")) return { results: openingDates };
             if (sql.includes("FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id")) return { results: identities.filter((row) => row.source !== "daily") };
             if (sql.includes("FROM xstats_daily_history WHERE session_id = ? GROUP BY account_id")) return { results: identities.filter((row) => row.source === "daily") };
             if (sql.includes("SELECT account_id, date, handle, display_name")) return { results: dailyRows };

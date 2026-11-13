@@ -16,6 +16,9 @@ function makeDatabase({ hasAvatarColumn, avatarUrl = null }) {
             if (query.startsWith('PRAGMA table_info("xstats_snapshots")')) {
               return { results: hasAvatarColumn ? [{ name: "avatar_url" }] : [] };
             }
+            if (query.startsWith('PRAGMA table_info("xstats_account_statuses")')) {
+              return { results: [{ name: "freeze_date" }] };
+            }
             if (query.includes("FROM xstats_snapshots AS snapshots")) {
               return {
                 results: [{
@@ -31,6 +34,7 @@ function makeDatabase({ hasAvatarColumn, avatarUrl = null }) {
                   avatar_url: avatarUrl,
                   account_status: "active",
                   joined: null,
+                  freeze_date: null,
                 }],
               };
             }

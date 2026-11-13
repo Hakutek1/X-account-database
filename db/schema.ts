@@ -100,6 +100,7 @@ export const xstatsAccountStatuses = sqliteTable("xstats_account_statuses", {
   accountId: text("account_id").notNull(),
   status: text("status", { enum: ACCOUNT_STATUSES }).notNull().default("active"),
   joinedAt: text("joined_at"),
+  freezeDate: text("freeze_date"),
   updatedAt: text("updated_at").notNull(),
 }, (table) => ({
   sessionAccountUnique: uniqueIndex("xstats_account_statuses_session_account_uq").on(table.sessionId, table.accountId),
@@ -241,6 +242,7 @@ export const schemaSql = {
     account_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended', 'suspended', 'non_alt')),
     joined_at TEXT,
+    freeze_date TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (session_id, account_id),
     FOREIGN KEY (session_id) REFERENCES xstats_sessions(id)
