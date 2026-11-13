@@ -31,7 +31,7 @@ export default function HistoricalNumberGrid({children, columns, onUpdateCell}: 
  const selected=()=>{const b=bounds();return inputs().filter((_,i)=>Math.floor(i/columns)>=b.top&&Math.floor(i/columns)<=b.bottom&&i%columns>=b.left&&i%columns<=b.right);};
  return <><p className="historical-grid-help">クリックでセル選択・ドラッグまたはShiftで範囲選択。ダブルクリックで編集。選択中はコピー・貼り付け・Deleteが使えます。</p><p role="alert">{error}</p><div ref={root}
  onPointerDownCapture={e=>{const input=locate(e.target);if(e.button!==0||e.pointerType==="touch"||!input||!input.readOnly)return;e.preventDefault();stopDrag();const i=inputs().indexOf(input);if(!e.shiftKey)anchor.current=i;end.current=i;input.focus({preventScroll:true});paint();drag.current={id:e.pointerId,x:e.clientX,y:e.clientY,input};input.setPointerCapture(e.pointerId);frame.current=requestAnimationFrame(updateDrag);}}
- onPointerMove={e=>{if(drag.current?.id!==e.pointerId)return;drag.current.x=e.clientX;drag.current.y=e.clientY;e.preventDefault();}}
+ onPointerMove={e=>{if(drag.current?.id!==e.pointerId)return;drag.current.x=e.clientX;drag.current.y=e.clientY;e.preventDefault();if(frame.current!==null)cancelAnimationFrame(frame.current);updateDrag();}}
  onPointerUp={e=>{if(drag.current?.id===e.pointerId)stopDrag();}}
  onPointerCancel={stopDrag}
  onLostPointerCapture={stopDrag}
