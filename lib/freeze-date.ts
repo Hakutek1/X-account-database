@@ -44,13 +44,17 @@ export function buildFrozenMetricIndex<Row extends {
     const freezeDate = row.freeze_date;
     if (!isValidFreezeDate(freezeDate)) continue;
     const date = getRecordDate(row);
-    if (!date || date > freezeProjectionCutoff(freezeDate)) continue;
+    if (!date) continue;
     let entry = result.get(row.account_id);
     if (!entry) {
       entry = { freezeDate, projectionDate: freezeProjectionCutoff(freezeDate), atFreeze: emptyMetrics(), beforeFreeze: emptyMetrics(), latestRow: null };
       result.set(row.account_id, entry);
     }
-    if (!entry.latestRow) entry.latestRow = row;
+    if (date > entry.projectionDate) {
+      if (!entry.latestRow) entry.latestRow = row;
+      continue;
+    }
+    if (!entry.latestRow || (getRecordDate(entry.latestRow) ?? "") > entry.projectionDate) entry.latestRow = row;
     else {
       const currentDate = getRecordDate(entry.latestRow);
       if (!currentDate || date > currentDate || (date === currentDate && row.fetched_at >= entry.latestRow.fetched_at)) entry.latestRow = row;
