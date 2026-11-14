@@ -8,8 +8,14 @@ export function shouldUnfreezeAfterCollection(freezeDate: string | null | undefi
   return Boolean(freezeDate && collectionDate && isValidFreezeDate(freezeDate) && isValidFreezeDate(collectionDate) && collectionDate > freezeDate);
 }
 
+export function freezeProjectionCutoff(freezeDate: string) {
+  const date = new Date(freezeDate + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 export function frozenProjectionDate(selectedDate: string, freezeDate: string | null | undefined) {
-  return freezeDate && isValidFreezeDate(freezeDate) && selectedDate >= freezeDate ? freezeDate : selectedDate;
+  return freezeDate && isValidFreezeDate(freezeDate) && selectedDate > freezeDate ? freezeProjectionCutoff(freezeDate) : selectedDate;
 }
 
 type FreezeMetricPoint = { date: string; value: number; fetchedAt: string } | null;
@@ -17,6 +23,7 @@ type FreezeMetricValues = { followers: FreezeMetricPoint; following: FreezeMetri
 
 export type FrozenMetricIndexEntry<Row> = {
   freezeDate: string;
+  projectionDate: string;
   atFreeze: FreezeMetricValues;
   beforeFreeze: FreezeMetricValues;
   latestRow: Row | null;
@@ -35,12 +42,12 @@ export function buildFrozenMetricIndex<Row extends {
   const emptyMetrics = (): FreezeMetricValues => ({ followers: null, following: null, posts: null });
   for (const row of rows) {
     const freezeDate = row.freeze_date;
-    if (row.account_status !== "suspended" || !isValidFreezeDate(freezeDate)) continue;
+    if (!isValidFreezeDate(freezeDate)) continue;
     const date = getRecordDate(row);
-    if (!date || date > freezeDate) continue;
+    if (!date || date > freezeProjectionCutoff(freezeDate)) continue;
     let entry = result.get(row.account_id);
     if (!entry) {
-      entry = { freezeDate, atFreeze: emptyMetrics(), beforeFreeze: emptyMetrics(), latestRow: null };
+      entry = { freezeDate, projectionDate: freezeProjectionCutoff(freezeDate), atFreeze: emptyMetrics(), beforeFreeze: emptyMetrics(), latestRow: null };
       result.set(row.account_id, entry);
     }
     if (!entry.latestRow) entry.latestRow = row;
