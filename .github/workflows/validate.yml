@@ -208,6 +208,8 @@ jobs:
           APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-api-access.mjs public
           APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-read-access-browser.mjs
           PREVIEW_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/preview-screenshots.mjs
+          APP_URL=http://127.0.0.1:4174 node .github/scripts/test-editor-undo.mjs
+          APP_URL=http://127.0.0.1:4174 node .github/scripts/test-lifecycle-projection.mjs
           run_d1 "SELECT 'READ_ONLY|' || (SELECT last_seen_at FROM xstats_sessions WHERE id = 'xstats-public-shared') || '|' || (SELECT updated_at FROM xstats_daily_history_meta WHERE session_id = 'xstats-public-shared') || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) || '|' || (SELECT COUNT(*) FROM xstats_account_targets) AS result" | grep -F 'READ_ONLY|2000-01-01T00:00:00.000Z|2000-01-01T00:00:00.000Z|0|0|0|0|0|0|0|0|0|0'
           APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-account-target-sync.mjs
           cat > "$RUNNER_TEMP/seed-historical-save.sql" <<'SQL'

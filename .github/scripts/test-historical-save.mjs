@@ -217,6 +217,28 @@ const clearedAccount = afterClear.body.accounts.find((item) => item.accountId ==
 assert.equal(clearedAccount.status, "active", "changing to a non-frozen status must clear the freeze state");
 assert.equal(clearedAccount.freezeDate, null);
 
+// Verify lifecycle dates and status remain independent through real D1 saves.
+for (const lifecycleStatus of ["ended", "active", "non_alt", "suspended"]) {
+  const current = await request("/api/admin/historical-data?metric=followers", { cookie });
+  const lifecycleAccounts = current.body.accounts.map((item, index) => ({
+    ...item, originalAccountId: item.accountId,
+    status: index === 0 ? lifecycleStatus : item.status,
+    freezeDate: index === 0 ? "2026-11-10" : item.freezeDate,
+  }));
+  const saved = await request("/api/admin/historical-data", {cookie,method:"PUT",body:{metric:"followers",revision:current.body.revision,accounts:lifecycleAccounts,dates:current.body.dates,values:current.body.values}});
+  assert.equal(saved.response.status,200,JSON.stringify(saved.body));
+  const after = await request("/api/admin/historical-data?metric=followers", {cookie});
+  assert.equal(after.body.accounts[0].status,lifecycleStatus);
+  assert.equal(after.body.accounts[0].freezeDate,"2026-11-10");
+}
+const finalDateState = await request("/api/admin/historical-data?metric=followers", {cookie});
+const clearedDateAccounts = finalDateState.body.accounts.map((item,index)=>({...item,originalAccountId:item.accountId,freezeDate:index===0?null:item.freezeDate}));
+const clearedDate = await request("/api/admin/historical-data",{cookie,method:"PUT",body:{metric:"followers",revision:finalDateState.body.revision,accounts:clearedDateAccounts,dates:finalDateState.body.dates,values:finalDateState.body.values}});
+assert.equal(clearedDate.response.status,200);
+const clearedDateReload = await request("/api/admin/historical-data?metric=followers",{cookie});
+assert.equal(clearedDateReload.body.accounts[0].status,"suspended");
+assert.equal(clearedDateReload.body.accounts[0].freezeDate,null);
+
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

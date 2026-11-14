@@ -53,6 +53,7 @@ type AccountRow = {
   status: "ok" | "error";
   accountStatus: AccountStatus;
   freezeDate?: string | null;
+  lifecycleProjected?: boolean;
   error?: string;
 };
 
@@ -309,7 +310,8 @@ function formatResultNumber(value: number | null | undefined) {
   return value === null || value === undefined ? "-" : formatNumber(value);
 }
 
-function formatNormalMetricNumber(value: number | null | undefined) {
+function formatNormalMetricNumber(value: number | null | undefined, preserveMissing = false) {
+  if (preserveMissing && (value === null || value === undefined)) return "-";
   return formatNumber(value ?? 0);
 }
 
@@ -405,8 +407,8 @@ function TableHeader({ label, sortKey, deltaSortKey, activeKey, direction, onSor
   );
 }
 
-function MetricCell({ value }: { value: number | null }) {
-  return <td className="numeric-cell metric-cell"><span className="metric-main">{formatNormalMetricNumber(value)}</span></td>;
+function MetricCell({ value, preserveMissing = false }: { value: number | null; preserveMissing?: boolean }) {
+  return <td className="numeric-cell metric-cell"><span className="metric-main">{formatNormalMetricNumber(value, preserveMissing)}</span></td>;
 }
 
 function DeltaCell({ value }: { value: number | null | undefined }) {
@@ -414,7 +416,7 @@ function DeltaCell({ value }: { value: number | null | undefined }) {
 }
 
 function AccountStatusBadge({ status, freezeDate }: { status: AccountStatus | undefined; freezeDate?: string | null }) {
-  const label = status === "suspended" && freezeDate ? `凍結（${freezeDate}）` : accountStatusLabel(status);
+  const label = freezeDate ? `${accountStatusLabel(status)}（凍結日／垢削除日：${freezeDate}）` : accountStatusLabel(status);
   return <span className={`account-status-badge account-status-${status ?? "active"}`}>{label}</span>;
 }
 
@@ -465,10 +467,10 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
                 </a> : <span className="account-link account-link-disabled"><span className="account-avatar account-avatar-fallback" aria-hidden="true">?</span><span className="handle-cell">@{row.handle}</span></span>}
                 {row.status === "error" && <span className="status-pill status-error">失敗</span>}
               </td>
-              <MetricCell value={row.followers} />
+              <MetricCell value={row.followers} preserveMissing={row.lifecycleProjected} />
               <DeltaCell value={previousByAccount.get(row.id)?.followers} />
-              <td className="numeric-cell">{formatNormalMetricNumber(row.following)}</td>
-              <MetricCell value={row.posts} />
+              <td className="numeric-cell">{formatNormalMetricNumber(row.following, row.lifecycleProjected)}</td>
+              <MetricCell value={row.posts} preserveMissing={row.lifecycleProjected} />
               <DeltaCell value={previousByAccount.get(row.id)?.posts} />
               <td>{row.status === "ok" ? formatDate(row.joined) : row.error ?? "—"}</td>
             </tr>
@@ -1601,10 +1603,10 @@ export default function Home() {
       ? availableHistoryDates(chartHistoryRows, topMetricField, statusFilter)
       : [...new Set(chartHistoryRows.filter((row) => matchesStatusFilter(row.account_status, statusFilter) && row.followers !== null && row.followers > 0 && row.posts !== null && row.posts !== undefined && row.posts > 0).map((row) => chartDateParts(row.fetched_at)).filter((parts): parts is { year: string; month: string; day: string } => Boolean(parts)).map((parts) => parts.year + "-" + parts.month + "-" + parts.day))];
     const frozenDates = [...frozenMetricIndex.values()]
-      .filter((entry) => matchesStatusFilter("suspended", statusFilter) && (topMetric === "postsPerFollower"
+      .filter((entry) => matchesStatusFilter(entry.latestRow?.account_status ?? "active", statusFilter) && (topMetric === "postsPerFollower"
         ? (entry.atFreeze.followers?.value ?? 0) > 0 && (entry.atFreeze.posts?.value ?? 0) > 0
         : entry.atFreeze[topMetricField] !== null))
-      .map((entry) => entry.freezeDate);
+      .map((entry) => entry.projectionDate);
     return [...new Set([...historyDates, ...frozenDates])].sort();
   }, [chartHistoryRows, frozenMetricIndex, statusFilter, topMetric, topMetricField]);
   const topDateMin = topAvailableDates[0] ?? "";
@@ -1620,7 +1622,7 @@ export default function Home() {
       if (!current || new Date(row.fetched_at).getTime() > new Date(current.fetched_at).getTime()) latestByHandle.set(handle, row);
     }
     for (const entry of frozenMetricIndex.values()) {
-      if (!selectedTopDate || frozenProjectionDate(selectedTopDate, entry.freezeDate) !== entry.freezeDate || !entry.latestRow) continue;
+      if (!selectedTopDate || frozenProjectionDate(selectedTopDate, entry.freezeDate) !== entry.projectionDate || !entry.latestRow) continue;
       const source = entry.latestRow;
       latestByHandle.set(source.handle.toLowerCase(), {
         ...source,
@@ -1628,7 +1630,7 @@ export default function Home() {
         followers: entry.atFreeze.followers?.value ?? null,
         following: entry.atFreeze.following?.value ?? null,
         posts: entry.atFreeze.posts?.value ?? null,
-        account_status: "suspended",
+        account_status: source.account_status,
         freeze_date: entry.freezeDate,
       });
     }
@@ -1670,7 +1672,7 @@ export default function Home() {
     for (const row of topDateRows) {
       const previous = previousByHandle.get(row.handle.toLowerCase());
       const frozen = frozenMetricIndex.get(row.id);
-      const useFreezeBaseline = Boolean(frozen && selectedTopDate >= frozen.freezeDate);
+      const useFreezeBaseline = Boolean(frozen && selectedTopDate >= frozen.projectionDate);
       const previousFollowers = useFreezeBaseline ? frozen?.beforeFreeze.followers?.value : previous?.followers;
       const previousFollowing = useFreezeBaseline ? frozen?.beforeFreeze.following?.value : previous?.following;
       const previousPosts = useFreezeBaseline ? frozen?.beforeFreeze.posts?.value : previous?.posts;
@@ -1685,8 +1687,8 @@ export default function Home() {
   const resultAvailableDates = useMemo(() => {
     const historyDates = availableHistoryDates(chartHistoryRows, "any", statusFilter);
     const frozenDates = [...frozenMetricIndex.values()]
-      .filter((entry) => matchesStatusFilter("suspended", statusFilter) && Object.values(entry.atFreeze).some((value) => value !== null))
-      .map((entry) => entry.freezeDate);
+      .filter((entry) => matchesStatusFilter(entry.latestRow?.account_status ?? "active", statusFilter) && Object.values(entry.atFreeze).some((value) => value !== null))
+      .map((entry) => entry.projectionDate);
     return [...new Set([...historyDates, ...frozenDates])].sort();
   }, [chartHistoryRows, frozenMetricIndex, statusFilter]);
   const resultDateMin = resultAvailableDates[0] ?? "";
@@ -1713,7 +1715,7 @@ export default function Home() {
       const history = historyByAccount.get(account.id) ?? historyByAccount.get("handle:" + account.handle.toLowerCase());
       const frozen = frozenMetricIndex.get(account.id);
       const projectionDate = frozenProjectionDate(selectedResultDate, frozen?.freezeDate);
-      if (frozen && projectionDate === frozen.freezeDate && frozen.latestRow) {
+      if (frozen && projectionDate === frozen.projectionDate && frozen.latestRow) {
         return {
           ...account,
           handle: frozen.latestRow.handle,
@@ -1722,9 +1724,10 @@ export default function Home() {
           followers: frozen.atFreeze.followers?.value ?? null,
           following: frozen.atFreeze.following?.value ?? null,
           posts: frozen.atFreeze.posts?.value ?? null,
-          fetchedAt: canonicalDailyFetchedAt(frozen.freezeDate),
-          accountStatus: "suspended" as const,
+          fetchedAt: canonicalDailyFetchedAt(frozen.projectionDate),
+          accountStatus: frozen.latestRow.account_status,
           freezeDate: frozen.freezeDate,
+          lifecycleProjected: true,
         };
       }
       return history ? { ...account, handle: history.handle, displayName: history.display_name, avatarUrl: history.avatar_url ?? account.avatarUrl, followers: history.followers, following: history.following, posts: history.posts, fetchedAt: history.fetched_at, accountStatus: history.account_status, freezeDate: history.freeze_date } : account;
@@ -1743,7 +1746,7 @@ export default function Home() {
     for (const row of resultDateRows) {
       const previous = previousByAccount.get(row.id);
       const frozen = frozenMetricIndex.get(row.id);
-      const useFreezeBaseline = Boolean(frozen && selectedResultDate >= frozen.freezeDate);
+      const useFreezeBaseline = Boolean(frozen && selectedResultDate >= frozen.projectionDate);
       const previousFollowers = useFreezeBaseline ? frozen?.beforeFreeze.followers?.value : previous?.followers;
       const previousFollowing = useFreezeBaseline ? frozen?.beforeFreeze.following?.value : previous?.following;
       const previousPosts = useFreezeBaseline ? frozen?.beforeFreeze.posts?.value : previous?.posts;
