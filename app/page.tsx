@@ -53,6 +53,7 @@ type AccountRow = {
   status: "ok" | "error";
   accountStatus: AccountStatus;
   freezeDate?: string | null;
+  lifecycleProjected?: boolean;
   error?: string;
 };
 
@@ -309,7 +310,8 @@ function formatResultNumber(value: number | null | undefined) {
   return value === null || value === undefined ? "-" : formatNumber(value);
 }
 
-function formatNormalMetricNumber(value: number | null | undefined) {
+function formatNormalMetricNumber(value: number | null | undefined, preserveMissing = false) {
+  if (preserveMissing && (value === null || value === undefined)) return "-";
   return formatNumber(value ?? 0);
 }
 
@@ -405,8 +407,8 @@ function TableHeader({ label, sortKey, deltaSortKey, activeKey, direction, onSor
   );
 }
 
-function MetricCell({ value }: { value: number | null }) {
-  return <td className="numeric-cell metric-cell"><span className="metric-main">{formatNormalMetricNumber(value)}</span></td>;
+function MetricCell({ value, preserveMissing = false }: { value: number | null; preserveMissing?: boolean }) {
+  return <td className="numeric-cell metric-cell"><span className="metric-main">{formatNormalMetricNumber(value, preserveMissing)}</span></td>;
 }
 
 function DeltaCell({ value }: { value: number | null | undefined }) {
@@ -465,10 +467,10 @@ function ResultsTable({ rows, onSort, sortKey, direction, previousByAccount, dis
                 </a> : <span className="account-link account-link-disabled"><span className="account-avatar account-avatar-fallback" aria-hidden="true">?</span><span className="handle-cell">@{row.handle}</span></span>}
                 {row.status === "error" && <span className="status-pill status-error">失敗</span>}
               </td>
-              <MetricCell value={row.followers} />
+              <MetricCell value={row.followers} preserveMissing={row.lifecycleProjected} />
               <DeltaCell value={previousByAccount.get(row.id)?.followers} />
-              <td className="numeric-cell">{formatNormalMetricNumber(row.following)}</td>
-              <MetricCell value={row.posts} />
+              <td className="numeric-cell">{formatNormalMetricNumber(row.following, row.lifecycleProjected)}</td>
+              <MetricCell value={row.posts} preserveMissing={row.lifecycleProjected} />
               <DeltaCell value={previousByAccount.get(row.id)?.posts} />
               <td>{row.status === "ok" ? formatDate(row.joined) : row.error ?? "—"}</td>
             </tr>
@@ -1725,6 +1727,7 @@ export default function Home() {
           fetchedAt: canonicalDailyFetchedAt(frozen.projectionDate),
           accountStatus: frozen.latestRow.account_status,
           freezeDate: frozen.freezeDate,
+          lifecycleProjected: true,
         };
       }
       return history ? { ...account, handle: history.handle, displayName: history.display_name, avatarUrl: history.avatar_url ?? account.avatarUrl, followers: history.followers, following: history.following, posts: history.posts, fetchedAt: history.fetched_at, accountStatus: history.account_status, freezeDate: history.freeze_date } : account;
