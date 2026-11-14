@@ -4,8 +4,8 @@ export function isValidFreezeDate(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-export function shouldUnfreezeAfterCollection(freezeDate: string | null | undefined, collectionDate: string | null | undefined) {
-  return Boolean(freezeDate && collectionDate && isValidFreezeDate(freezeDate) && isValidFreezeDate(collectionDate) && collectionDate > freezeDate);
+export function shouldUnfreezeAfterCollection(freezeDate: string | null | undefined, collectionDate: string | null | undefined, accountStatus: string | undefined) {
+  return Boolean(accountStatus === "suspended" && freezeDate && collectionDate && isValidFreezeDate(freezeDate) && isValidFreezeDate(collectionDate) && collectionDate > freezeDate);
 }
 
 export function freezeProjectionCutoff(freezeDate: string) {
