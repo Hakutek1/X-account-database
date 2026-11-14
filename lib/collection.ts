@@ -1,6 +1,6 @@
 import { MAX_ACCOUNTS, fetchProfiles } from "./x-stats";
 import { pruneSessionHistory } from "../app/api/_shared";
-import { ensureAccountJoinedDates, ensureAccountStatuses, loadAccountFreezeDateMap } from "./account-status";
+import { ensureAccountJoinedDates, ensureAccountStatuses, loadAccountStatusMap, loadAccountFreezeDateMap } from "./account-status";
 import { shouldUnfreezeAfterCollection } from "./freeze-date.ts";
 import { dailyRecordDate, ensureDailyPostsThroughToday, ensureOpeningDateHistory } from "./daily-history";
 
@@ -24,11 +24,11 @@ export async function collectForSession({ db, sessionId, handles, sourceSummary,
   await ensureAccountStatuses(db, sessionId, results.map((result) => result.id), fetchedAt);
   await ensureAccountJoinedDates(db, sessionId, results.map((result) => ({ accountId: result.id, joined: result.joined })), fetchedAt);
   const collectionDate = dailyRecordDate(fetchedAt);
-  const freezeDates = await loadAccountFreezeDateMap(db, sessionId);
-  const unfrozenAccounts = results.filter((result) => shouldUnfreezeAfterCollection(freezeDates.get(result.id), collectionDate));
+  const [freezeDates, statuses] = await Promise.all([loadAccountFreezeDateMap(db, sessionId), loadAccountStatusMap(db, sessionId)]);
+  const unfrozenAccounts = results.filter((result) => statuses.get(result.id) === "suspended" && shouldUnfreezeAfterCollection(freezeDates.get(result.id), collectionDate));
   if (unfrozenAccounts.length) {
     const now = new Date().toISOString();
-    await db.batch(unfrozenAccounts.map((account) => db.prepare("UPDATE xstats_account_statuses SET status = 'active', freeze_date = NULL, updated_at = ? WHERE session_id = ? AND account_id = ? AND freeze_date IS NOT NULL").bind(now, sessionId, account.id)));
+    await db.batch(unfrozenAccounts.map((account) => db.prepare("UPDATE xstats_account_statuses SET status = 'active', freeze_date = NULL, updated_at = ? WHERE session_id = ? AND account_id = ? AND freeze_date IS NOT NULL AND status = 'suspended'").bind(now, sessionId, account.id)));
   }
   await ensureOpeningDateHistory(db, sessionId);
   await ensureDailyPostsThroughToday(db, sessionId);
