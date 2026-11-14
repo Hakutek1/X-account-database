@@ -2,7 +2,7 @@ import { MAX_ACCOUNTS, fetchProfiles } from "./x-stats";
 import { pruneSessionHistory } from "../app/api/_shared";
 import { ensureAccountJoinedDates, ensureAccountStatuses, loadAccountStatusMap, loadAccountFreezeDateMap } from "./account-status";
 import { shouldUnfreezeAfterCollection } from "./freeze-date.ts";
-import { dailyRecordDate, ensureDailyPostsThroughToday, ensureOpeningDateHistory } from "./daily-history";
+import { jstCalendarDate, ensureDailyPostsThroughToday, ensureOpeningDateHistory } from "./daily-history";
 
 export type CollectionResult = Awaited<ReturnType<typeof collectForSession>>;
 
@@ -23,7 +23,7 @@ export async function collectForSession({ db, sessionId, handles, sourceSummary,
   await db.batch(statements);
   await ensureAccountStatuses(db, sessionId, results.map((result) => result.id), fetchedAt);
   await ensureAccountJoinedDates(db, sessionId, results.map((result) => ({ accountId: result.id, joined: result.joined })), fetchedAt);
-  const collectionDate = dailyRecordDate(fetchedAt);
+  const collectionDate = jstCalendarDate(fetchedAt);
   const [freezeDates, statuses] = await Promise.all([loadAccountFreezeDateMap(db, sessionId), loadAccountStatusMap(db, sessionId)]);
   const unfrozenAccounts = results.filter((result) => shouldUnfreezeAfterCollection(freezeDates.get(result.id), collectionDate, statuses.get(result.id)));
   if (unfrozenAccounts.length) {
