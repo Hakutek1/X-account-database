@@ -123,7 +123,7 @@ const HistoricalDataRow = memo(function HistoricalDataRow({ account, dates, metr
     <td><input value={account.handle} onChange={(event) => onUpdateAccount(account.key, "handle", event.target.value)} aria-label={`${account.accountId}のハンドル名`} /></td>
     <td><input value={account.displayName} onChange={(event) => onUpdateAccount(account.key, "displayName", event.target.value)} aria-label={`${account.accountId}の表示名`} /></td>
     <td className="historical-status-cell"><select value={account.status} onChange={(event) => onUpdateAccount(account.key, "status", event.target.value)} aria-label={`${account.accountId}の活動状態`}>{ACCOUNT_STATUSES.map((status) => <option key={status} value={status}>{ACCOUNT_STATUS_LABELS[status]}</option>)}</select></td>
-    <td className="historical-freeze-date-cell"><input type="date" value={account.freezeDate} onChange={(event) => onUpdateAccount(account.key, "freezeDate", event.target.value)} aria-label={`${account.handle}の凍結日`} /></td>
+    <td className="historical-freeze-date-cell"><input type="date" value={account.freezeDate} onChange={(event) => onUpdateAccount(account.key, "freezeDate", event.target.value)} aria-label={`${account.handle}の凍結日／垢削除日`} /></td>
     <td className="historical-avatar-cell"><div className="historical-avatar-editor">{account.avatarUrl ? <ExternalAvatarImage src={account.avatarUrl} className="historical-avatar-preview" /> : <span className="historical-avatar-empty">未設定</span>}<label className="historical-avatar-upload"><input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAvatar(account, file); event.currentTarget.value = ""; }} disabled={isUploadingAvatar} /><span>{isUploadingAvatar ? "保存中…" : "画像を選択"}</span></label>{account.avatarUrl && <button type="button" className="historical-avatar-remove" onClick={() => onRemoveAvatar(account)} disabled={isUploadingAvatar}>削除</button>}</div></td>
     {dates.map((date) => <td key={date}><input className="historical-number-input" readOnly data-account-key={account.key} data-date={date} type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} defaultValue={rowValues?.[date] ?? ""} onChange={(event) => onUpdateCell(account.key, date, event.target.value)} aria-label={`${account.accountId} ${displayDate(date)} ${metricLabels[metric]}`} /></td>)}
     <td><button type="button" className="historical-row-delete" onClick={() => onRemove(account)}>行を削除</button></td>
@@ -146,7 +146,61 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   const [tableVersion, setTableVersion] = useState(0);
   const draftValuesRef = useRef<Record<string, Record<string, number | null>>>({});
 
+  const accountStateRef = useRef<EditorAccount[]>([]);
+  const undoHistoryRef = useRef<Array<() => void>>([]);
+  const pendingCellsRef = useRef(new Map<string, { accountKey: string; date: string; value: number | null | undefined }>());
+  const pendingAccountRef = useRef<string | null>(null);
+  const replaceAccounts = useCallback((action: EditorAccount[] | ((current: EditorAccount[]) => EditorAccount[])) => {
+    const next = typeof action === "function" ? action(accountStateRef.current) : action;
+    accountStateRef.current = next;
+    setAccounts(next);
+  }, []);
+  const pushUndo = useCallback((operation: () => void) => {
+    undoHistoryRef.current.push(operation);
+    if (undoHistoryRef.current.length > 100) undoHistoryRef.current.shift();
+  }, []);
+  const redrawValues = useCallback(() => {
+    setValues({ ...draftValuesRef.current });
+    setTableVersion(current => current + 1);
+  }, []);
+  const flushCellOperation = useCallback(() => {
+    const changed = [...pendingCellsRef.current.values()].filter(item => (draftValuesRef.current[item.accountKey]?.[item.date] ?? null) !== (item.value ?? null));
+    pendingCellsRef.current.clear();
+    if (!changed.length) return;
+    pushUndo(() => {
+      for (const item of changed) {
+        const row = { ...(draftValuesRef.current[item.accountKey] ?? {}) };
+        if (item.value === undefined) delete row[item.date]; else row[item.date] = item.value;
+        draftValuesRef.current[item.accountKey] = row;
+      }
+      redrawValues();
+    });
+  }, [pushUndo, redrawValues]);
+  const clearUndo = useCallback(() => {
+    undoHistoryRef.current = [];
+    pendingCellsRef.current.clear();
+    pendingAccountRef.current = null;
+  }, []);
+  const undo = () => {
+    flushCellOperation();
+    pendingAccountRef.current = null;
+    const operation = undoHistoryRef.current.pop();
+    if (!operation) return;
+    operation();
+    setError(null);
+    setMessage("1つ前の編集状態に戻しました。");
+  };
+  const handleUndoKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== "z" || isLoading || isSaving || uploadingAvatarKey) return;
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && !target.readOnly && ["text", "search", "number"].includes(target.type))) return;
+    event.preventDefault();
+    event.stopPropagation();
+    undo();
+  };
+
   const load = async (nextMetric: MetricKey) => {
+    clearUndo();
     setIsLoading(true);
     setError(null);
     setMessage(null);
@@ -161,7 +215,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
       const nextValues: Record<string, Record<string, number | null>> = {};
       for (const account of nextAccounts) nextValues[account.key] = { ...(payload.values?.[account.accountId] ?? {}) };
       draftValuesRef.current = nextValues;
-      setAccounts(nextAccounts);
+      replaceAccounts(nextAccounts);
       setDates([...(payload.dates ?? [])].sort());
       setValues(nextValues);
       setRevision(Number(payload.revision ?? 0));
@@ -179,18 +233,29 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, [metric]);
 
   const updateAccount = useCallback((key: string, field: AccountField, value: string) => {
-    setAccounts((current) => current.map((account) => {
+    flushCellOperation();
+    const previous = accountStateRef.current.find(account => account.key === key);
+    const group = key + ":" + field;
+    const textField = field === "accountId" || field === "handle" || field === "displayName";
+    if (previous && previous[field] !== value && (!textField || pendingAccountRef.current !== group)) {
+      const oldValue = previous[field];
+      pushUndo(() => replaceAccounts(current => current.map(account => account.key === key ? { ...account, [field]: oldValue } : account)));
+      pendingAccountRef.current = textField ? group : null;
+    }
+    replaceAccounts((current) => current.map((account) => {
       if (account.key !== key) return account;
-      if (field === "status") return isAccountStatus(value) ? { ...account, status: value, freezeDate: value === "suspended" ? account.freezeDate : "" } : account;
-      if (field === "freezeDate") return { ...account, freezeDate: value, status: value ? "suspended" : account.status };
+      if (field === "status") return isAccountStatus(value) ? { ...account, status: value, freezeDate: account.freezeDate } : account;
+      if (field === "freezeDate") return { ...account, freezeDate: value };
       return { ...account, [field]: value };
     }));
-  }, []);
+  }, [flushCellOperation, pushUndo, replaceAccounts]);
 
   const updateCell = useCallback((accountKey: string, date: string, rawValue: string) => {
     if (rawValue !== "" && !/^\d+$/.test(rawValue)) return;
     const value = rawValue === "" ? null : Number(rawValue);
     if (value !== null && !Number.isSafeInteger(value)) return;
+    const pendingKey = JSON.stringify([accountKey, date]);
+    if (!pendingCellsRef.current.has(pendingKey)) pendingCellsRef.current.set(pendingKey, { accountKey, date, value: draftValuesRef.current[accountKey]?.[date] });
     draftValuesRef.current[accountKey] = { ...(draftValuesRef.current[accountKey] ?? {}), [date]: Number.isFinite(value) ? value : null };
   }, []);
 
@@ -208,6 +273,13 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
       setError("その日付は既に存在します。");
       return;
     }
+    flushCellOperation();
+    const addedDate = newDate;
+    pushUndo(() => {
+      setDates(current => current.filter(date => date !== addedDate));
+      for (const key of Object.keys(draftValuesRef.current)) { const row = { ...draftValuesRef.current[key] }; delete row[addedDate]; draftValuesRef.current[key] = row; }
+      redrawValues();
+    });
     setDates((current) => [...current, newDate].sort());
     setNewDate("");
     setError(null);
@@ -215,6 +287,13 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
 
   const removeDate = useCallback((date: string) => {
     if (!window.confirm(`${displayDate(date)}の${metricLabels[metric]}データを削除しますか？`)) return;
+    flushCellOperation();
+    const removed = Object.entries(draftValuesRef.current).map(([key, row]) => ({ key, value: row[date] }));
+    pushUndo(() => {
+      setDates(current => [...current, date].sort());
+      for (const item of removed) if (item.value !== undefined) draftValuesRef.current[item.key] = { ...(draftValuesRef.current[item.key] ?? {}), [date]: item.value };
+      redrawValues();
+    });
     setDates((current) => current.filter((item) => item !== date));
     setValues((current) => {
       const next = { ...current };
@@ -225,8 +304,8 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
       }
       return next;
     });
-    for (const row of Object.values(draftValuesRef.current)) delete row[date];
-  }, [metric]);
+    for (const key of Object.keys(draftValuesRef.current)) { const row = { ...draftValuesRef.current[key] }; delete row[date]; draftValuesRef.current[key] = row; }
+  }, [metric, flushCellOperation, pushUndo, redrawValues]);
 
   const addAccount = () => {
     const accountId = newAccount.accountId.trim();
@@ -241,7 +320,13 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
       return;
     }
     const account = { key: newKey(), originalAccountId: accountId, accountId, handle, displayName, status: "active" as const, freezeDate: "", avatarUrl: null };
-    setAccounts((current) => [...current, account]);
+    flushCellOperation();
+    pushUndo(() => {
+      replaceAccounts(current => current.filter(item => item.key !== account.key));
+      delete draftValuesRef.current[account.key];
+      redrawValues();
+    });
+    replaceAccounts((current) => [...current, account]);
     setValues((current) => ({ ...current, [account.key]: {} }));
     draftValuesRef.current[account.key] = {};
     setNewAccount({ accountId: "", handle: "", displayName: "" });
@@ -249,15 +334,23 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   };
 
   const removeAccount = useCallback((account: EditorAccount) => {
-    if (!window.confirm(`@${account.handle}をサイトと共有サーバーから完全に削除しますか？過去データ・取得履歴・アイコンが削除され、元に戻せません。`)) return;
-    setAccounts((current) => current.filter((item) => item.key !== account.key));
+    if (!window.confirm(`@${account.handle}をサイトと共有サーバーから完全に削除しますか？保存すると過去データ・取得履歴・アイコンが削除されます。保存前はCtrl／Command＋Zで戻せます。`)) return;
+    flushCellOperation();
+    const index = accountStateRef.current.findIndex(item => item.key === account.key);
+    const removedValues = { ...(draftValuesRef.current[account.key] ?? {}) };
+    pushUndo(() => {
+      replaceAccounts(current => { const next = [...current]; next.splice(index, 0, account); return next; });
+      draftValuesRef.current[account.key] = removedValues;
+      redrawValues();
+    });
+    replaceAccounts((current) => current.filter((item) => item.key !== account.key));
     setValues((current) => {
       const next = { ...current };
       delete next[account.key];
       return next;
     });
     delete draftValuesRef.current[account.key];
-  }, []);
+  }, [flushCellOperation, pushUndo, redrawValues, replaceAccounts]);
 
   const uploadAvatar = useCallback(async (account: EditorAccount, file: File) => {
     if (!isImageFile(file)) { setError("画像ファイルを選択してください。"); return; }
@@ -272,7 +365,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
       const response = await fetch("/api/admin/avatar", { method: "POST", credentials: "same-origin", cache: "no-store", body: form });
       const result = await response.json().catch(() => ({})) as { error?: string; avatarUrl?: string };
       if (!response.ok || !result.avatarUrl) throw new Error(result.error ?? "アイコンを保存できませんでした。");
-      setAccounts((current) => current.map((item) => item.key === account.key ? { ...item, avatarUrl: result.avatarUrl ?? null } : item));
+      replaceAccounts((current) => current.map((item) => item.key === account.key ? { ...item, avatarUrl: result.avatarUrl ?? null } : item));
       setMessage("補填アイコンを保存しました。");
       await onSaved();
     } catch (uploadError) {
@@ -280,7 +373,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     } finally {
       setUploadingAvatarKey(null);
     }
-  }, [onSaved]);
+  }, [onSaved, replaceAccounts]);
 
   const removeAvatar = useCallback(async (account: EditorAccount) => {
     if (!window.confirm(`@${account.handle}の補填アイコンを削除しますか？`)) return;
@@ -291,7 +384,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
       const response = await fetch("/api/admin/avatar", { method: "DELETE", headers: { "Content-Type": "application/json" }, credentials: "same-origin", cache: "no-store", body: JSON.stringify({ accountId: account.accountId.trim() }) });
       const result = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "アイコンを削除できませんでした。");
-      setAccounts((current) => current.map((item) => item.key === account.key ? { ...item, avatarUrl: null } : item));
+      replaceAccounts((current) => current.map((item) => item.key === account.key ? { ...item, avatarUrl: null } : item));
       setMessage("補填アイコンを削除しました。");
       await onSaved();
     } catch (removeError) {
@@ -299,11 +392,12 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     } finally {
       setUploadingAvatarKey(null);
     }
-  }, [onSaved]);
+  }, [onSaved, replaceAccounts]);
 
   const save = async () => {
     if (isSaving || isLoading) return;
     if (!window.confirm("保存しますか？")) return;
+    flushCellOperation();
     const payload = {
       metric,
       revision,
@@ -328,9 +422,10 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
         return [accountId, { ...(draftValuesRef.current[account.key] ?? {}) }];
       }));
       draftValuesRef.current = nextValues;
-      setAccounts(nextAccounts);
+      replaceAccounts(nextAccounts);
       setValues(nextValues);
       setRevision(nextRevision);
+      clearUndo();
       setTableVersion((current) => current + 1);
       setMessage(result.changedRows === 0
         ? "変更点はありません。最新の内容を維持しています。"
@@ -345,7 +440,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
 
   const editorBusy = isLoading || isSaving || Boolean(uploadingAvatarKey);
 
-  return <div className="historical-editor panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-historical" aria-labelledby="dashboard-tab-historical" tabIndex={0} aria-label="全履歴編集" aria-busy={editorBusy}>
+  return <div onKeyDown={handleUndoKeyDown} onBlurCapture={() => { flushCellOperation(); pendingAccountRef.current = null; }} className="historical-editor panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-historical" aria-labelledby="dashboard-tab-historical" tabIndex={0} aria-label="全履歴編集" aria-busy={editorBusy}>
     <div className="section-heading historical-editor-toolbar">
       <div>
         <h2>全履歴編集</h2>
@@ -363,7 +458,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
       <label><span>日付を追加</span><input type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} disabled={editorBusy} /></label><button type="button" className="secondary-button" onClick={addDate} disabled={editorBusy}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "日付を追加"}</button>
       <div className="historical-account-add"><span>アカウントを追加</span><input value={newAccount.accountId} onChange={(event) => setNewAccount((current) => ({ ...current, accountId: event.target.value }))} placeholder="アカウントID" aria-label="新しいアカウントID" disabled={editorBusy} /><input value={newAccount.handle} onChange={(event) => setNewAccount((current) => ({ ...current, handle: event.target.value }))} placeholder="ハンドル名" aria-label="新しいハンドル名" disabled={editorBusy} /><input value={newAccount.displayName} onChange={(event) => setNewAccount((current) => ({ ...current, displayName: event.target.value }))} placeholder="表示名" aria-label="新しい表示名" disabled={editorBusy} /><button type="button" className="secondary-button" onClick={addAccount} disabled={editorBusy}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "追加"}</button></div>
     </div>
-    {isLoading ? <div className="historical-editor-empty"><span className="button-spinner historical-loading-spinner" aria-hidden="true" />過去データを読み込んでいます…</div> : !accounts.length || !dates.length ? <div className="historical-editor-empty">編集するデータがありません。日付とアカウントを追加してください。</div> : <><p id="historical-grid-scroll-help" className="historical-scroll-hint">表は左右にスクロールできます。</p><HistoricalNumberGrid key={tableVersion + metric + dates.join(",") + accounts.map(account => account.key).join(",")} columns={dates.length} onUpdateCell={updateCell}><div className="historical-grid-wrap" aria-describedby="historical-grid-scroll-help"><table key={tableVersion} className="historical-grid"><thead><tr><th>アカウントID</th><th>ハンドル名</th><th>表示名</th><th>活動状態</th><th>凍結日</th><th>補填アイコン</th>{dates.map((date) => <th key={date}><span>{displayDate(date)}</span><button type="button" className="historical-delete-button" onClick={() => removeDate(date)} aria-label={`${displayDate(date)}を削除`} disabled={editorBusy}>×</button></th>)}<th>行操作</th></tr></thead><tbody>{accounts.map((account) => <HistoricalDataRow key={account.key} account={account} dates={dates} metric={metric} rowValues={values[account.key]} onUpdateAccount={updateAccount} onUpdateCell={updateCell} onRemove={removeAccount} onUploadAvatar={uploadAvatar} onRemoveAvatar={removeAvatar} isUploadingAvatar={uploadingAvatarKey === account.key} />)}</tbody></table></div></HistoricalNumberGrid></>}
+    {isLoading ? <div className="historical-editor-empty"><span className="button-spinner historical-loading-spinner" aria-hidden="true" />過去データを読み込んでいます…</div> : !accounts.length || !dates.length ? <div className="historical-editor-empty">編集するデータがありません。日付とアカウントを追加してください。</div> : <><p id="historical-grid-scroll-help" className="historical-scroll-hint">表は左右にスクロールできます。</p><HistoricalNumberGrid key={tableVersion + metric + dates.join(",") + accounts.map(account => account.key).join(",")} columns={dates.length} onUpdateCell={updateCell} onBeginOperation={flushCellOperation} onEndOperation={flushCellOperation}><div className="historical-grid-wrap" aria-describedby="historical-grid-scroll-help"><table key={tableVersion} className="historical-grid"><thead><tr><th>アカウントID</th><th>ハンドル名</th><th>表示名</th><th>活動状態</th><th>凍結日／垢削除日</th><th>補填アイコン</th>{dates.map((date) => <th key={date}><span>{displayDate(date)}</span><button type="button" className="historical-delete-button" onClick={() => removeDate(date)} aria-label={`${displayDate(date)}を削除`} disabled={editorBusy}>×</button></th>)}<th>行操作</th></tr></thead><tbody>{accounts.map((account) => <HistoricalDataRow key={account.key} account={account} dates={dates} metric={metric} rowValues={values[account.key]} onUpdateAccount={updateAccount} onUpdateCell={updateCell} onRemove={removeAccount} onUploadAvatar={uploadAvatar} onRemoveAvatar={removeAvatar} isUploadingAvatar={uploadingAvatarKey === account.key} />)}</tbody></table></div></HistoricalNumberGrid></>}
     <div className="historical-editor-footnote">保存先：共有サーバーD1。Excelは保存後に「データ出力」を押すと最新状態で生成されます。日付列の削除は選択中の指標だけに適用されます。</div>
     </div>
     {(Object.keys(metricLabels) as MetricKey[]).filter((item) => item !== metric).map((item) => <div key={item} id={"historical-metric-panel-" + item} role="tabpanel" aria-labelledby={"historical-metric-tab-" + item} hidden />)}
