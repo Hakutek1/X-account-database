@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+const browser=await chromium.launch({headless:true,channel:process.env.TEST_CHROME_CHANNEL||undefined});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ const statuses=["active","ended","suspended","non_alt"],rows=[];
+ for(let i=0;i<4;i++)for(const [day,followers,following,posts]of[["09",90,40,9],["10",100,42,10],["11",110,null,11],["12",999,999,999]])rows.push({id:i+"-"+day,run_id:"run"+day,account_id:"a"+i,handle:"user"+i,display_name:"Fixture"+i,account_status:statuses[i],freeze_date:"2026-11-10",fetched_at:"2026-11-"+day+"T03:00:00.000Z",followers,following,posts,avatar_url:null,joined:null});
+ rows.push({id:"future",run_id:"run12",account_id:"future",handle:"future",display_name:"FutureOnly",account_status:"active",freeze_date:"2026-11-10",fetched_at:"2026-11-12T03:00:00.000Z",followers:888,following:888,posts:888,avatar_url:null,joined:null});
+ await page.route("**/api/**",route=>{const url=route.request().url();return route.fulfill({status:200,json:url.includes("/admin/status")?{configured:true,isAdmin:false,readMode:"public"}:url.includes("/history")?{runs:[{id:"run12",fetched_at:"2026-11-12T03:00:00.000Z",success_count:5,error_count:0}],rows,registeredAccountCount:5}:{}});});
+ await page.goto(process.env.APP_URL??"http://127.0.0.1:4181",{waitUntil:"networkidle"});
+ await page.getByRole("button",{name:"全て",exact:true}).click();
+ const row=i=>page.locator(".results-table tbody tr").filter({hasText:"@user"+i});
+ await page.waitForFunction(()=>document.querySelectorAll(".results-table tbody tr").length===5);
+ const verify=async expected=>{for(let i=0;i<4;i++)assert.equal((await row(i).locator("td").nth(2).textContent()).trim(),String(expected));};
+ await verify(110);
+ const future=page.locator(".results-table tbody tr").filter({hasText:"@future"});
+ assert.equal((await future.locator("td").nth(2).textContent()).trim(),"—");
+ assert.equal((await row(0).locator("td").nth(4).textContent()).trim(),"42");
+ assert.equal((await row(0).locator("td").nth(5).textContent()).trim(),"11");
+ await page.getByRole("button",{name:"取得日のカレンダーを開く",exact:true}).click();
+ await page.getByRole("button",{name:"2026-11-11 データあり",exact:true}).click();await verify(110);
+ await page.getByRole("button",{name:"2026-11-10 データあり",exact:true}).click();await verify(100);
+ await page.getByRole("button",{name:"2026-11-09 データあり",exact:true}).click();await verify(90);
+ await page.getByRole("button",{name:"2026-11-12 データあり",exact:true}).click();await verify(110);
+ await page.getByRole("tab",{name:"コンパクト",exact:true}).click();
+ for(let i=0;i<4;i++)assert.equal(await page.locator(".compact-result-card").filter({hasText:"Fixture"+i}).locator(".compact-value-cell strong").first().textContent(),"110");
+ await page.getByRole("tab",{name:"ランキング",exact:true}).click();
+ for(let i=0;i<4;i++)assert.equal(await page.locator(".top15-card").filter({hasText:"Fixture"+i}).locator(".top15-value").textContent(),"110");
+ console.log(JSON.stringify({allStatuses:true,beforeOnAfter:true,nextDayIncluded:true,laterExcluded:true,missingValues:true,tableCompactRanking:true}));
+}finally{await browser.close();}
