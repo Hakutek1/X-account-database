@@ -53,5 +53,12 @@ try {
  for(let i=0;i<101;i++)await undo();
  assert.equal(await status.inputValue(),"ended","only the latest 100 actions are retained");
  await cells.first().dblclick();await cells.first().fill("99");await cells.first().press("Enter");await page.getByRole("tab",{name:"フォロー数",exact:true}).click();await cells.first().waitFor();await undo();assert.equal(await cells.first().inputValue(),"77","metric switch clears undo");
- console.log(JSON.stringify({numeric:true,rangeOperations:true,accountFields:true,lifecycleDate:true,rowAndDateOperations:true,saveFailure:true,saveBoundary:true,reload:true,historyLimit:100,metricSwitch:true}));
+ await cells.first().dblclick();await cells.first().fill("222");await cells.first().press("Enter");await undo();
+ await cells.first().dblclick();await cells.first().fill("321");await cells.first().press("Enter");
+ await page.getByLabel("日付を追加",{exact:true}).fill("2026-11-12");await page.getByRole("button",{name:"日付を追加",exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll(".historical-number-input").length===8);
+ assert.equal(await cells.first().inputValue(),"321","structural edits retain unsaved numeric values after undo");
+ await undo();assert.equal(await cells.count(),6);assert.equal(await cells.first().inputValue(),"321");
+ await undo();assert.equal(await cells.first().inputValue(),"77");
+ console.log(JSON.stringify({compoundUndo:true,numeric:true,rangeOperations:true,accountFields:true,lifecycleDate:true,rowAndDateOperations:true,saveFailure:true,saveBoundary:true,reload:true,historyLimit:100,metricSwitch:true}));
 }finally{await browser.close();}
