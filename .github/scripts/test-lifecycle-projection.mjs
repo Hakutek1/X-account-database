@@ -14,7 +14,7 @@ try{
  const verify=async expected=>{for(let i=0;i<4;i++)assert.equal((await row(i).locator("td").nth(2).textContent()).trim(),String(expected));};
  await verify(110);
  const future=page.locator(".results-table tbody tr").filter({hasText:"@future"});
- assert.equal((await future.locator("td").nth(2).textContent()).trim(),"—");
+ assert.equal((await future.locator("td").nth(2).textContent()).trim(),"-");
  assert.equal((await row(0).locator("td").nth(4).textContent()).trim(),"42");
  assert.equal((await row(0).locator("td").nth(5).textContent()).trim(),"11");
  await page.getByRole("button",{name:"取得日のカレンダーを開く",exact:true}).click();
