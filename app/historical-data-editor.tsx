@@ -201,7 +201,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     undo();
   };
 
-  const load = async (nextMetric: MetricKey) => {
+  const load = useCallback(async (nextMetric: MetricKey) => {
     clearUndo();
     setIsLoading(true);
     setError(null);
@@ -227,12 +227,12 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [clearUndo, replaceAccounts]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(metric); }, 0);
     return () => window.clearTimeout(timer);
-  }, [metric]);
+  }, [metric, load]);
 
   const updateAccount = useCallback((key: string, field: AccountField, value: string) => {
     flushCellOperation();
