@@ -17,9 +17,9 @@ test("projection starts the next day and includes that day's measurements", () =
  assert.equal(freezeProjectionCutoff("2024-02-29"),"2024-03-01");
 });
 test("successful collection must be later than the configured day", () => {
- assert.equal(shouldUnfreezeAfterCollection("2026-11-10","2026-11-10"),false);
- assert.equal(shouldUnfreezeAfterCollection("2026-11-10","2026-11-11"),true);
- assert.equal(shouldUnfreezeAfterCollection("2026-02-30","2026-11-11"),false);
+ assert.equal(shouldUnfreezeAfterCollection("2026-11-10","2026-11-10","suspended"),false);
+ assert.equal(shouldUnfreezeAfterCollection("2026-11-10","2026-11-11","suspended"),true);
+ assert.equal(shouldUnfreezeAfterCollection("2026-02-30","2026-11-11","suspended"),false);
 });
 test("all statuses use each metric's nearest valid value through the next-day cutoff", () => {
  for(const status of ["active","ended","suspended","non_alt"]) {
@@ -39,5 +39,13 @@ test("all statuses use each metric's nearest valid value through the next-day cu
 });
 test("missing measurements remain missing instead of becoming zero",()=>{
  const index=buildFrozenMetricIndex([{account_id:"a",account_status:"ended",freeze_date:"2026-11-10",fetched_at:"2026-11-11T01:00:00Z",followers:null,following:null,posts:null}],row=>row.fetched_at.slice(0,10));
+ assert.equal(index.get("a").atFreeze.followers,null);
+});
+
+test("collection success never clears dates for non-suspended accounts",()=> {
+ for(const status of ["active","ended","non_alt",undefined]) assert.equal(shouldUnfreezeAfterCollection("2026-11-10","2026-11-12",status),false);
+});
+test("records only after cutoff cannot leak into projected values",()=>{
+ const index=buildFrozenMetricIndex([{account_id:"a",account_status:"active",freeze_date:"2026-11-10",fetched_at:"2026-11-12T01:00:00Z",followers:999,following:999,posts:999}],row=>row.fetched_at.slice(0,10));
  assert.equal(index.get("a").atFreeze.followers,null);
 });
