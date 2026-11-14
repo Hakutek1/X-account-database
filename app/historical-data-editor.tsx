@@ -146,6 +146,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   const [tableVersion, setTableVersion] = useState(0);
   const draftValuesRef = useRef<Record<string, Record<string, number | null>>>({});
 
+  const editorRootRef = useRef<HTMLDivElement>(null);
   const accountStateRef = useRef<EditorAccount[]>([]);
   const undoHistoryRef = useRef<Array<() => void>>([]);
   const pendingCellsRef = useRef(new Map<string, { accountKey: string; date: string; value: number | null | undefined }>());
@@ -187,6 +188,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     const operation = undoHistoryRef.current.pop();
     if (!operation) return;
     operation();
+    editorRootRef.current?.focus({ preventScroll: true });
     setError(null);
     setMessage("1つ前の編集状態に戻しました。");
   };
@@ -440,11 +442,11 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
 
   const editorBusy = isLoading || isSaving || Boolean(uploadingAvatarKey);
 
-  return <div onKeyDown={handleUndoKeyDown} onBlurCapture={() => { flushCellOperation(); pendingAccountRef.current = null; }} className="historical-editor panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-historical" aria-labelledby="dashboard-tab-historical" tabIndex={0} aria-label="全履歴編集" aria-busy={editorBusy}>
+  return <div ref={editorRootRef} onKeyDown={handleUndoKeyDown} onBlurCapture={() => { flushCellOperation(); pendingAccountRef.current = null; }} className="historical-editor panel-card analysis-workspace-panel" role="tabpanel" id="dashboard-panel-historical" aria-labelledby="dashboard-tab-historical" tabIndex={0} aria-label="全履歴編集" aria-busy={editorBusy}>
     <div className="section-heading historical-editor-toolbar">
       <div>
         <h2>全履歴編集</h2>
-        <p className="historical-editor-help">Excelの日次履歴と同じ形式です。日付・アカウント・数値を管理者が編集できます。</p>
+        <p className="historical-editor-help">Excelの日次履歴と同じ形式です。日付・アカウント・数値を管理者が編集できます。保存前はCtrl／Command＋Zで編集を戻せます。</p>
       </div>
       <div className="historical-editor-actions"><button type="button" className="secondary-button" onClick={() => void load(metric)} disabled={editorBusy} aria-busy={isLoading}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "再読み込み"}</button><button type="button" className="primary-button" onClick={() => void save()} disabled={editorBusy} aria-busy={isSaving}>{isSaving ? <><span className="button-spinner" aria-hidden="true" />保存中…</> : "変更を保存"}</button></div>
     </div>
