@@ -65,14 +65,13 @@ function cleanAccount(value: AccountInput): Account | null {
   const originalAccountId = String(value.originalAccountId ?? accountId).trim() || accountId;
   const handle = String(value.handle ?? "").trim().replace(/^@/, "").toLowerCase();
   const displayName = String(value.displayName ?? "").trim();
-  let status = value.status === undefined ? "active" : value.status;
+  const status = value.status === undefined ? "active" : value.status;
   if (!isAccountStatus(status) || !accountId || !originalAccountId || !handle || !displayName || accountId.length > 200 || originalAccountId.length > 200 || handle.length > 200 || displayName.length > 300) return null;
   let freezeDate: string | null | undefined;
   if (value.freezeDate === undefined) freezeDate = undefined;
   else if (value.freezeDate === null || value.freezeDate === "") freezeDate = null;
   else if (typeof value.freezeDate !== "string" || !validDate(value.freezeDate)) return null;
   else freezeDate = value.freezeDate;
-  if (freezeDate) status = "suspended";
   return { accountId, originalAccountId, handle, displayName, status, freezeDate };
 }
 
@@ -230,7 +229,7 @@ export async function PUT(request: Request) {
     const expectedRevision = Number(body.revision);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return json({ error: "履歴の版情報が正しくありません。" }, { status: 400 });
     const rawAccounts = Array.isArray(body.accounts) ? body.accounts as AccountInput[] : [];
-    if (rawAccounts.some((account) => account.freezeDate !== undefined && account.freezeDate !== null && account.freezeDate !== "" && (typeof account.freezeDate !== "string" || !validDate(account.freezeDate)))) return json({ error: "凍結日は存在する日付をYYYY-MM-DD形式で入力してください。" }, { status: 400 });
+    if (rawAccounts.some((account) => account.freezeDate !== undefined && account.freezeDate !== null && account.freezeDate !== "" && (typeof account.freezeDate !== "string" || !validDate(account.freezeDate)))) return json({ error: "凍結日／垢削除日は存在する日付をYYYY-MM-DD形式で入力してください。" }, { status: 400 });
     const accounts = rawAccounts.map(cleanAccount);
     if (accounts.some((account): account is null => account === null)) return json({ error: "アカウント情報が不足しています。" }, { status: 400 });
     if (accounts.length > MAX_ACCOUNTS) return json({ error: `アカウントは${MAX_ACCOUNTS}件まで保存できます。` }, { status: 413 });
@@ -288,7 +287,7 @@ export async function PUT(request: Request) {
     for (const account of cleanAccounts) {
       const previousFreezeDate = freezeDateByAccount.get(account.originalAccountId) ?? freezeDateByAccount.get(account.accountId) ?? null;
       const requestedFreezeDate = account.freezeDate === undefined ? previousFreezeDate : account.freezeDate;
-      account.freezeDate = account.status === "suspended" ? requestedFreezeDate : null;
+      account.freezeDate = requestedFreezeDate;
     }
     const knownAccountIds = new Set([...snapshots.results.map((row) => row.account_id), ...dailyRows.map((row) => row.account_id)]);
     const submittedOriginalIds = new Set(cleanAccounts.map((account) => account.originalAccountId));
