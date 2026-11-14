@@ -168,6 +168,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     const changed = [...pendingCellsRef.current.values()].filter(item => (draftValuesRef.current[item.accountKey]?.[item.date] ?? null) !== (item.value ?? null));
     pendingCellsRef.current.clear();
     if (!changed.length) return;
+    setValues({ ...draftValuesRef.current });
     pushUndo(() => {
       for (const item of changed) {
         const row = { ...(draftValuesRef.current[item.accountKey] ?? {}) };
