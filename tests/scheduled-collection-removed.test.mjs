@@ -31,7 +31,7 @@ test("server-side scheduled collection has been fully removed", () => {
   assert.doesNotMatch(database, /xstats_(?:schedules|watchlist)/);
   assert.doesNotMatch(shared, /pruneAllSessionsHistory/);
 
-  assert.match(page, /\/api\/collect/);
+  assert.match(page, /\/api\/update-stats/);
   assert.match(page, /グラフ表示/);
   assert.match(schema, /xstatsAccountStatuses/);
   assert.match(schema, /xstatsDailyHistory/);
