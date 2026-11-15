@@ -1,4 +1,4 @@
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin } from "../../_shared";
 import { ensureDailyHistory, upsertImportedDailyHistory } from "../../../../lib/daily-history";
 
 type MappingInput = { sourceName?: unknown; sourceKey?: unknown; accountId?: unknown; handle?: unknown; displayName?: unknown };
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const db = getD1();
     await ensureSharedSession(db);
     await ensureDailyHistory(db, session.id);
-    const known = await db.prepare("SELECT account_id, handle, display_name FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id").bind(session.id).all<{ account_id: string; handle: string; display_name: string }>();
+    const known = await db.prepare("SELECT account_id, handle, display_name FROM xstats_daily_history WHERE session_id = ? GROUP BY account_id").bind(session.id).all<{ account_id: string; handle: string; display_name: string }>();
     const knownById = new Map(known.results.map((row) => [row.account_id, row]));
     const cleanMappings = mappings.map((mapping) => ({
       sourceName: String(mapping.sourceName ?? "").trim(),
@@ -74,17 +74,6 @@ export async function POST(request: Request) {
       }),
     ];
 
-    const byDate = new Map<string, typeof cleanSnapshots>();
-    for (const snapshot of cleanSnapshots) byDate.set(snapshot.date, [...(byDate.get(snapshot.date) ?? []), snapshot]);
-    for (const [, dateSnapshots] of byDate) {
-      const runId = crypto.randomUUID();
-      statements.push(db.prepare("INSERT INTO xstats_runs (id, session_id, fetched_at, source_summary, success_count, error_count) VALUES (?, ?, ?, ?, ?, 0)").bind(runId, session.id, dateSnapshots[0].fetchedAt, JSON.stringify({ imported: true, importId, sourceFileName: String(body.sourceFileName ?? "") }), dateSnapshots.length));
-      for (const snapshot of dateSnapshots) {
-        const account = snapshot.account!;
-        statements.push(db.prepare("INSERT INTO xstats_snapshots (id, run_id, session_id, account_id, handle, display_name, followers, following, posts, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), runId, session.id, snapshot.accountId, account.handle, account.display_name, snapshot.followers, snapshot.following, snapshot.posts, snapshot.fetchedAt));
-      }
-    }
-
     const cleanIssues = issues.map((issue) => ({
       issueType: String(issue.issueType ?? "unmatched"),
       sourceSheet: String(issue.sourceSheet ?? ""),
@@ -112,7 +101,6 @@ export async function POST(request: Request) {
       following: snapshot.following,
       posts: snapshot.posts,
     })), now);
-    await pruneSessionHistory(db, session.id);
     const response = json({ importId, importedSnapshots: cleanSnapshots.length, savedMappings: mappingBySource.size, issues: cleanIssues.length });
     return response;
   } catch (error) {

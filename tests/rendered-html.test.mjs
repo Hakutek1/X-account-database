@@ -5,7 +5,7 @@ import test from "node:test";
 const developmentPreviewMeta = /codex-preview/i;
 
 test("the X account statistics dashboard contains the product UI", async () => {
-  const [html, layout, css, shared, collect, history, favicon, collection, worker, vite, sheetNames, historicalEditor, historicalApi, schema, siteVersionRoute, siteVersionLib, xStats] = await Promise.all([
+  const [html, layout, css, shared, collect, history, favicon, collection, worker, vite, sheetNames, historicalEditor, historicalApi, schema, siteVersionRoute, siteVersionLib, xStats, duplicateCleanup] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -23,6 +23,7 @@ test("the X account statistics dashboard contains the product UI", async () => {
     readFile(new URL("../app/api/site-version/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/site-version.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/x-stats.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/nflf-duplicate/route.ts", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(html, developmentPreviewMeta);
   assert.match(html, /複垢データベース/);
@@ -118,8 +119,8 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.match(html, /type="color"/);
   assert.doesNotMatch(html, /showOpenFilePicker|requestPermission|createWritable|loadSourceWorkbook|saveSourceWorkbook|refreshSourceWorkbook/);
   assert.doesNotMatch(html, /Excel日次履歴を再読込/);
-  assert.match(html, /const allHistoryRows = \[\.\.\.historyRowsForExport, \.\.\.latestRowsForExport\]/);
-  assert.match(html, /D1履歴データ/);
+  assert.match(html, /const dailyRows = buildDailyChartRows\(historyRows\)/);
+  assert.match(html, /D1日次履歴/);
   assert.match(historicalEditor, /変更を保存/);
   assert.match(historicalEditor, /アカウントを追加/);
   assert.match(historicalEditor, /日付を追加/);
@@ -231,11 +232,7 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.match(css, /html\[data-theme="dark"\] \.handle-cell \{ color: #fff; \}/);
   assert.match(css, /--silver/);
   assert.match(css, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
-  assert.match(shared, /JST_OFFSET_MS/);
-  assert.match(shared, /THREE_HOUR_MS/);
-  assert.match(shared, /N\+3:00/);
-  assert.doesNotMatch(shared, /pruneAllSessionsHistory/);
-  assert.match(shared, /pruneSessionHistory/);
+  assert.doesNotMatch(shared, /JST_OFFSET_MS|THREE_HOUR_MS|pruneSessionHistory|DELETE FROM xstats_snapshots/);
   assert.match(collect, /collectForSession/);
   assert.match(xStats, /FXTWITTER_MAX_ATTEMPTS = 3/);
   assert.match(xStats, /RETRYABLE_FXTWITTER_STATUS_CODES/);
@@ -249,10 +246,14 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.match(collect, /requireAdmin/);
   assert.doesNotMatch(collect, /isAdminRequest/);
   assert.doesNotMatch(collect, /replaceWatchlist/);
-  assert.match(historicalApi, /pruneSessionHistory/);
+  assert.doesNotMatch(historicalApi, /pruneSessionHistory|DELETE FROM xstats_snapshots|UPDATE xstats_snapshots/);
   assert.match(historicalApi, /ensureDailyPostsThroughToday/);
   assert.match(historicalApi, /ensureOpeningDateHistory/);
-  assert.match(collect, /pruneSessionHistory/);
+  assert.doesNotMatch(collect, /pruneSessionHistory/);
+  assert.match(collection, /upsertAcquiredDailyHistory/);
+  assert.doesNotMatch(collection, /INSERT INTO xstats_snapshots/);
+  assert.doesNotMatch(duplicateCleanup, /DELETE FROM xstats_snapshots|UPDATE xstats_snapshots|DELETE FROM xstats_runs/);
+  assert.match(duplicateCleanup, /DELETE FROM xstats_daily_history/);
   assert.match(html, /followersDelta/);
   assert.match(html, /postsDelta/);
   assert.match(html, /TOP15/);

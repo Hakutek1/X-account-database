@@ -44,8 +44,10 @@ export async function POST(request: Request) {
     const keep = rows.find((row) => row.account_id === keepAccountId);
     if (!remove || !keep) return json({ error: "指定された2つのIDがNFLFの重複候補として確認できません。", candidates: rows }, { status: 409 });
     if (Number(remove.target_date_count) !== 0 || Number(keep.target_date_count) < 1) return json({ error: "7/25データの有無が指定条件と一致しないため、安全のため削除しませんでした。", remove, keep }, { status: 409 });
-    const deleted = await db.prepare("DELETE FROM xstats_snapshots WHERE session_id = ? AND account_id = ?").bind(session.id, removeAccountId).run();
-    await db.prepare("DELETE FROM xstats_runs WHERE session_id = ? AND id NOT IN (SELECT DISTINCT run_id FROM xstats_snapshots WHERE session_id = ?)").bind(session.id, session.id).run();
-    return json({ removed: true, removedAccountId: removeAccountId, keptAccountId: keepAccountId, deletedSnapshots: deleted.meta.changes ?? 0, targetDate: TARGET_DATE });
-  } catch (error) { return json({ error: error instanceof Error ? error.message : "NFLFの重複データを削除できませんでした。" }, { status: 500 }); }
+    const deleted = await db.prepare("DELETE FROM xstats_daily_history WHERE session_id = ? AND account_id = ?").bind(session.id, removeAccountId).run();
+    if (Number(deleted.meta?.changes ?? 0) > 0) {
+      await db.prepare("UPDATE xstats_daily_history_meta SET revision = revision + 1, updated_at = ? WHERE session_id = ?").bind(new Date().toISOString(), session.id).run();
+    }
+    return json({ removed: true, removedAccountId: removeAccountId, keptAccountId: keepAccountId, deletedDailyRows: deleted.meta.changes ?? 0, targetDate: TARGET_DATE });
+  } catch (error) { return json({ error: error instanceof Error ? error.message : "NFLFの日次履歴を整理できませんでした。" }, { status: 500 }); }
 }

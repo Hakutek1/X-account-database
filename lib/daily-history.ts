@@ -109,6 +109,21 @@ type SnapshotForBackfill = {
   posts: number | null;
 };
 
+type DailyHistoryBackfillAggregate = {
+  date: string;
+  accountId: string;
+  handle: string;
+  displayName: string;
+  fetchedAt: string;
+  latestFetchedAt: number;
+  followers: number | null;
+  following: number | null;
+  posts: number | null;
+  followerAt: number;
+  followingAt: number;
+  postsAt: number;
+};
+
 async function migrateLegacyDailyBuckets(database: D1Database, sessionId: string, updatedAt: string) {
   const [legacy, freezeDateByAccount] = await Promise.all([
     database.prepare(`SELECT id, session_id, date, account_id, handle, display_name, followers, following, posts
@@ -122,10 +137,20 @@ async function migrateLegacyDailyBuckets(database: D1Database, sessionId: string
     // Keep the existing legacy row intact when its migration would carry it
     // beyond the account's freeze date.
     if (freezeDate && date > freezeDate) continue;
-    statements.push(database.prepare("DELETE FROM xstats_daily_history WHERE session_id = ? AND id = ?").bind(sessionId, row.id));
-    statements.push(database.prepare(`INSERT OR IGNORE INTO xstats_daily_history
+    statements.push(database.prepare(`INSERT INTO xstats_daily_history
       (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'migration', ?)`).bind(stableDailyHistoryId(row.account_id, date), sessionId, date, row.account_id, row.handle, row.display_name, row.followers, row.following, row.posts, canonicalDailyFetchedAt(date), updatedAt));
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'migration', ?)
+      ON CONFLICT(session_id, account_id, date) DO UPDATE SET
+        handle = excluded.handle,
+        display_name = excluded.display_name,
+        followers = COALESCE(xstats_daily_history.followers, excluded.followers),
+        following = COALESCE(xstats_daily_history.following, excluded.following),
+        posts = COALESCE(xstats_daily_history.posts, excluded.posts),
+        updated_at = excluded.updated_at`).bind(stableDailyHistoryId(row.account_id, date), sessionId, date, row.account_id, row.handle, row.display_name, row.followers, row.following, row.posts, canonicalDailyFetchedAt(date), updatedAt));
+    // The legacy date-shift is retained for databases interrupted during the
+    // previous migration. Delete the source only after the merged target write
+    // in the same D1 batch, so conflicting rows cannot silently lose values.
+    statements.push(database.prepare("DELETE FROM xstats_daily_history WHERE session_id = ? AND id = ?").bind(sessionId, row.id));
   }
   for (const statementChunk of chunk(statements, 80)) if (statementChunk.length) await database.batch(statementChunk);
 }
@@ -133,80 +158,92 @@ async function migrateLegacyDailyBuckets(database: D1Database, sessionId: string
 export async function ensureDailyHistory(database: D1Database, sessionId: string) {
   const now = new Date().toISOString();
   await database.prepare("INSERT INTO xstats_daily_history_meta (session_id, revision, backfilled, updated_at) VALUES (?, 0, 0, ?) ON CONFLICT(session_id) DO NOTHING").bind(sessionId, now).run();
-  const meta = await database.prepare("SELECT revision, backfilled FROM xstats_daily_history_meta WHERE session_id = ?").bind(sessionId).first<{ revision: number; backfilled: number }>();
+  let meta = await database.prepare("SELECT revision, backfilled FROM xstats_daily_history_meta WHERE session_id = ?").bind(sessionId).first<{ revision: number; backfilled: number }>();
   if (meta?.backfilled === 1) {
     await migrateLegacyDailyBuckets(database, sessionId, now);
     await database.prepare("UPDATE xstats_daily_history_meta SET backfilled = 2, updated_at = ? WHERE session_id = ?").bind(now, sessionId).run();
-    return { revision: meta.revision, backfilled: 2 };
+    meta = { ...meta, backfilled: 2 };
   }
-  if ((meta?.backfilled ?? 0) >= 2) return meta;
+  if ((meta?.backfilled ?? 0) >= 3) return meta;
 
-  const [source, freezeDateByAccount] = await Promise.all([
-    database.prepare("SELECT id, fetched_at, account_id, handle, display_name, followers, following, posts FROM xstats_snapshots WHERE session_id = ? ORDER BY fetched_at ASC").bind(sessionId).all<SnapshotForBackfill>(),
-    loadAccountFreezeDateMap(database, sessionId),
-  ]);
-  const grouped = new Map<string, {
-    date: string;
-    accountId: string;
-    handle: string;
-    displayName: string;
-    fetchedAt: string;
-    followers: number | null;
-    following: number | null;
-    posts: number | null;
-    followerAt: number;
-    followingAt: number;
-    postsAt: number;
-  }>();
-
-  for (const row of source.results) {
-    const date = dailyRecordDate(row.fetched_at);
-    if (!date || date > DAILY_HISTORY_CUTOFF) continue;
-    const freezeDate = freezeDateByAccount.get(row.account_id);
-    if (freezeDate && date > freezeDate) continue;
-    const key = `${row.account_id}|${date}`;
-    const fetchedAt = new Date(row.fetched_at).getTime();
-    const current = grouped.get(key) ?? {
-      date,
-      accountId: row.account_id,
-      handle: row.handle,
-      displayName: row.display_name,
-      fetchedAt: canonicalDailyFetchedAt(date),
-      followers: null,
-      following: null,
-      posts: null,
-      followerAt: -Infinity,
-      followingAt: -Infinity,
-      postsAt: -Infinity,
-    };
-    if (fetchedAt >= current.followerAt && row.followers !== null) {
-      current.followers = row.followers;
-      current.followerAt = fetchedAt;
+  // The old system only copied snapshots through a fixed cutoff. Backfill the
+  // entire retained archive, filling missing daily values without replacing
+  // manual rows or deleting any legacy snapshot.
+  const grouped = new Map<string, DailyHistoryBackfillAggregate>();
+  const pageSize = 500;
+  let offset = 0;
+  while (true) {
+    const source = await database.prepare(`SELECT id, fetched_at, account_id, handle, display_name, followers, following, posts
+      FROM xstats_snapshots WHERE session_id = ? ORDER BY fetched_at ASC, id ASC LIMIT ? OFFSET ?`).bind(sessionId, pageSize, offset).all<SnapshotForBackfill>();
+    if (!source.results.length) break;
+    for (const row of source.results) {
+      const date = dailyRecordDate(row.fetched_at);
+      const fetchedAt = new Date(row.fetched_at).getTime();
+      if (!date || !Number.isFinite(fetchedAt)) continue;
+      const key = `${row.account_id}|${date}`;
+      const current = grouped.get(key) ?? {
+        date,
+        accountId: row.account_id,
+        handle: row.handle,
+        displayName: row.display_name,
+        fetchedAt: canonicalDailyFetchedAt(date),
+        latestFetchedAt: -Infinity,
+        followers: null,
+        following: null,
+        posts: null,
+        followerAt: -Infinity,
+        followingAt: -Infinity,
+        postsAt: -Infinity,
+      };
+      if (row.followers !== null && fetchedAt >= current.followerAt) {
+        current.followers = row.followers;
+        current.followerAt = fetchedAt;
+      }
+      if (row.following !== null && fetchedAt >= current.followingAt) {
+        current.following = row.following;
+        current.followingAt = fetchedAt;
+      }
+      if (row.posts !== null && fetchedAt >= current.postsAt) {
+        current.posts = row.posts;
+        current.postsAt = fetchedAt;
+      }
+      if (fetchedAt >= current.latestFetchedAt) {
+        current.handle = row.handle;
+        current.displayName = row.display_name;
+        current.latestFetchedAt = fetchedAt;
+      }
+      grouped.set(key, current);
     }
-    if (fetchedAt >= current.followingAt && row.following !== null) {
-      current.following = row.following;
-      current.followingAt = fetchedAt;
-    }
-    if (fetchedAt >= current.postsAt && row.posts !== null) {
-      current.posts = row.posts;
-      current.postsAt = fetchedAt;
-    }
-    if (fetchedAt >= new Date(current.fetchedAt).getTime()) {
-      current.handle = row.handle;
-      current.displayName = row.display_name;
-    }
-    grouped.set(key, current);
+    offset += source.results.length;
+    if (source.results.length < pageSize) break;
   }
 
   const statements = [...grouped.values()]
     .filter((row) => row.followers !== null || row.following !== null || row.posts !== null)
-    .map((row) => database.prepare(`INSERT OR IGNORE INTO xstats_daily_history
+    .map((row) => database.prepare(`INSERT INTO xstats_daily_history
       (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'migration', ?)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'snapshot-backfill', ?)
+      ON CONFLICT(session_id, account_id, date) DO UPDATE SET
+        handle = excluded.handle,
+        display_name = excluded.display_name,
+        followers = CASE WHEN xstats_daily_history.origin = 'manual' THEN xstats_daily_history.followers
+          WHEN xstats_daily_history.origin IN ('carry-forward', 'opening-date', 'migration') THEN COALESCE(excluded.followers, xstats_daily_history.followers)
+          ELSE COALESCE(xstats_daily_history.followers, excluded.followers) END,
+        following = CASE WHEN xstats_daily_history.origin = 'manual' THEN xstats_daily_history.following
+          WHEN xstats_daily_history.origin IN ('carry-forward', 'opening-date', 'migration') THEN COALESCE(excluded.following, xstats_daily_history.following)
+          ELSE COALESCE(xstats_daily_history.following, excluded.following) END,
+        posts = CASE WHEN xstats_daily_history.origin = 'manual' THEN xstats_daily_history.posts
+          WHEN xstats_daily_history.origin IN ('carry-forward', 'opening-date', 'migration') THEN COALESCE(excluded.posts, xstats_daily_history.posts)
+          ELSE COALESCE(xstats_daily_history.posts, excluded.posts) END,
+        fetched_at = excluded.fetched_at,
+        updated_at = excluded.updated_at,
+        origin = CASE WHEN xstats_daily_history.origin IN ('manual', 'imported') THEN xstats_daily_history.origin
+          WHEN xstats_daily_history.origin IN ('carry-forward', 'opening-date', 'migration') THEN 'snapshot-backfill'
+          ELSE xstats_daily_history.origin END`)
       .bind(stableDailyHistoryId(row.accountId, row.date), sessionId, row.date, row.accountId, row.handle, row.displayName, row.followers, row.following, row.posts, row.fetchedAt, now));
   for (const statementChunk of chunk(statements, 80)) if (statementChunk.length) await database.batch(statementChunk);
-  await database.prepare("UPDATE xstats_daily_history_meta SET backfilled = 2, updated_at = ? WHERE session_id = ?").bind(now, sessionId).run();
-  return { revision: meta?.revision ?? 0, backfilled: 2 };
+  await database.prepare("UPDATE xstats_daily_history_meta SET backfilled = 3, revision = revision + ?, updated_at = ? WHERE session_id = ?").bind(statements.length ? 1 : 0, now, sessionId).run();
+  return { revision: (meta?.revision ?? 0) + (statements.length ? 1 : 0), backfilled: 3 };
 }
 
 type LatestPostRecord = {
@@ -232,9 +269,8 @@ type ExistingPostRecord = {
  */
 export async function ensureDailyPostsThroughToday(database: D1Database, sessionId: string, today = dateParts(new Date().toISOString())) {
   if (!today) return;
-  const [daily, snapshots, openingDates, existing, freezeDateByAccount, suspendedAccounts] = await Promise.all([
+  const [daily, openingDates, existing, freezeDateByAccount, suspendedAccounts] = await Promise.all([
     database.prepare("SELECT date, account_id, handle, display_name, posts, fetched_at, origin FROM xstats_daily_history WHERE session_id = ? AND posts IS NOT NULL AND date <= ?").bind(sessionId, today).all<{ date: string; account_id: string; handle: string; display_name: string; posts: number; fetched_at: string; origin: string }>(),
-    database.prepare("SELECT account_id, handle, display_name, posts, fetched_at FROM xstats_snapshots WHERE session_id = ? AND posts IS NOT NULL").bind(sessionId).all<{ account_id: string; handle: string; display_name: string; posts: number; fetched_at: string }>(),
     database.prepare("SELECT account_id, joined_at FROM xstats_account_statuses WHERE session_id = ? AND joined_at IS NOT NULL").bind(sessionId).all<{ account_id: string; joined_at: string }>(),
     database.prepare("SELECT account_id, date, posts, origin FROM xstats_daily_history WHERE session_id = ? AND date <= ?").bind(sessionId, today).all<ExistingPostRecord>(),
     loadAccountFreezeDateMap(database, sessionId),
@@ -258,10 +294,6 @@ export async function ensureDailyPostsThroughToday(database: D1Database, session
   for (const row of daily.results) {
     if (row.origin === "opening-date" || row.origin === "carry-forward") continue;
     consider({ date: row.date, accountId: row.account_id, handle: row.handle, displayName: row.display_name, posts: row.posts, fetchedAt: row.fetched_at });
-  }
-  for (const row of snapshots.results) {
-    const date = dailyRecordDate(row.fetched_at);
-    if (date) consider({ date, accountId: row.account_id, handle: row.handle, displayName: row.display_name, posts: row.posts, fetchedAt: row.fetched_at });
   }
   const openingDateByAccount = new Map(openingDates.results.map((row) => [row.account_id, jstCalendarDate(row.joined_at)] as const));
   const staleCarryForwardKeys = new Set<string>();
@@ -320,35 +352,17 @@ type OpeningDateDaily = OpeningDateIdentity & {
   posts: number | null;
 };
 
-type OpeningDateSnapshot = OpeningDateIdentity & {
-  fetched_at: string;
-  followers: number | null;
-  following: number | null;
-  posts: number | null;
-};
-
 /** Create a zero opening-day record only when the account has no recorded values for that day. */
 export async function ensureOpeningDateHistory(database: D1Database, sessionId: string, today = dateParts(new Date().toISOString())) {
   if (!today) return 0;
-  const [openingDates, identities, dailyRows, snapshots] = await Promise.all([
+  const [openingDates, identities, dailyRows] = await Promise.all([
     database.prepare("SELECT account_id, joined_at, freeze_date FROM xstats_account_statuses WHERE session_id = ? AND joined_at IS NOT NULL").bind(sessionId).all<OpeningDateAccount>(),
-    database.prepare(`SELECT account_id, handle, display_name FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id
-      UNION SELECT account_id, handle, display_name FROM xstats_daily_history WHERE session_id = ? GROUP BY account_id`).bind(sessionId, sessionId).all<OpeningDateIdentity>(),
+    database.prepare("SELECT account_id, handle, display_name FROM xstats_daily_history WHERE session_id = ? GROUP BY account_id").bind(sessionId).all<OpeningDateIdentity>(),
     database.prepare("SELECT account_id, date, handle, display_name, followers, following, posts FROM xstats_daily_history WHERE session_id = ?").bind(sessionId).all<OpeningDateDaily>(),
-    database.prepare("SELECT account_id, handle, display_name, fetched_at, followers, following, posts FROM xstats_snapshots WHERE session_id = ?").bind(sessionId).all<OpeningDateSnapshot>(),
   ]);
 
   const identityByAccount = new Map(identities.results.map((row) => [row.account_id, row] as const));
   const dailyByKey = new Map(dailyRows.results.map((row) => [`${row.account_id}|${row.date}`, row] as const));
-  const rawByKey = new Map<string, OpeningDateSnapshot>();
-  for (const snapshot of snapshots.results) {
-    const date = dailyRecordDate(snapshot.fetched_at);
-    if (!date) continue;
-    const key = `${snapshot.account_id}|${date}`;
-    const current = rawByKey.get(key);
-    if (!current || new Date(snapshot.fetched_at).getTime() >= new Date(current.fetched_at).getTime()) rawByKey.set(key, snapshot);
-  }
-
   const statements: D1PreparedStatement[] = [];
   let changed = 0;
   for (const account of openingDates.results) {
@@ -357,7 +371,7 @@ export async function ensureOpeningDateHistory(database: D1Database, sessionId: 
     if (account.freeze_date && openingDate > account.freeze_date) continue;
     const key = `${account.account_id}|${openingDate}`;
     const existing = dailyByKey.get(key);
-    const raw = rawByKey.get(key);
+    const raw = existing;
     const identity = existing ?? identityByAccount.get(account.account_id);
     if (!identity) continue;
     if (existing) {
@@ -398,10 +412,10 @@ export async function bumpDailyHistoryRevision(database: D1Database, sessionId: 
   return Number(result.meta?.changes ?? 0) === 1;
 }
 
-export async function upsertImportedDailyHistory(database: D1Database, sessionId: string, rows: DailyHistoryUpsertRow[], updatedAt = new Date().toISOString()) {
+async function upsertDailyHistoryRows(database: D1Database, sessionId: string, rows: DailyHistoryUpsertRow[], origin: "acquired" | "imported", updatedAt: string) {
   const grouped = new Map<string, DailyHistoryUpsertRow>();
   for (const row of rows) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || row.date > DAILY_HISTORY_CUTOFF || !row.accountId || !row.handle || !row.displayName) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !row.accountId || !row.handle || !row.displayName) continue;
     const key = `${row.accountId}|${row.date}`;
     const current = grouped.get(key) ?? { ...row };
     current.handle = row.handle;
@@ -411,20 +425,48 @@ export async function upsertImportedDailyHistory(database: D1Database, sessionId
     if (row.posts !== undefined && row.posts !== null) current.posts = row.posts;
     grouped.set(key, current);
   }
-  const existingRows = grouped.size ? await loadDailyHistory(database, sessionId) : [];
+  const groupedRows = [...grouped.values()];
+  if (!groupedRows.length) return;
+  const accountIds = [...new Set(groupedRows.map((row) => row.accountId))];
+  const dates = [...new Set(groupedRows.map((row) => row.date))];
+  const existingRows: DailyHistoryRow[] = [];
+  // Collection touches one or two dates across at most 500 accounts. Query
+  // only the affected account/date blocks instead of loading the full history
+  // table on every run. Keep each statement below SQLite's bind-variable cap.
+  if (dates.length <= 3) {
+    const datePlaceholders = dates.map(() => "?").join(", ");
+    const existing = await database.prepare(`SELECT id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at
+      FROM xstats_daily_history WHERE session_id = ? AND date IN (${datePlaceholders})`)
+      .bind(sessionId, ...dates).all<DailyHistoryRow>();
+    existingRows.push(...existing.results);
+  } else {
+    for (let accountIndex = 0; accountIndex < accountIds.length; accountIndex += 40) {
+      const accountChunk = accountIds.slice(accountIndex, accountIndex + 40);
+      for (let dateIndex = 0; dateIndex < dates.length; dateIndex += 30) {
+        const accountPlaceholders = accountChunk.map(() => "?").join(", ");
+        const dateChunk = dates.slice(dateIndex, dateIndex + 30);
+        const datePlaceholders = dateChunk.map(() => "?").join(", ");
+        const existing = await database.prepare(`SELECT id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at
+          FROM xstats_daily_history WHERE session_id = ? AND account_id IN (${accountPlaceholders}) AND date IN (${datePlaceholders})`)
+          .bind(sessionId, ...accountChunk, ...dateChunk).all<DailyHistoryRow>();
+        existingRows.push(...existing.results);
+      }
+    }
+  }
   const existingByKey = new Map(existingRows.map((row) => [`${row.account_id}|${row.date}`, row]));
-  let changed = false;
-  for (const row of grouped.values()) {
+  const changedRows: DailyHistoryUpsertRow[] = [];
+  for (const row of groupedRows) {
     const previous = existingByKey.get(`${row.accountId}|${row.date}`);
-    const nextOrigin = previous?.origin === "manual" ? "manual" : "imported";
+    const nextOrigin = previous?.origin === "manual" ? "manual" : origin;
     const nextFollowers = previous?.origin === "manual" ? previous.followers : row.followers ?? previous?.followers ?? null;
     const nextFollowing = previous?.origin === "manual" ? previous.following : row.following ?? previous?.following ?? null;
     const nextPosts = previous?.origin === "manual" ? previous.posts : row.posts ?? previous?.posts ?? null;
-    if (!previous || previous.handle !== row.handle || previous.display_name !== row.displayName || previous.followers !== nextFollowers || previous.following !== nextFollowing || previous.posts !== nextPosts || previous.fetched_at !== canonicalDailyFetchedAt(row.date) || previous.origin !== nextOrigin) changed = true;
+    if (!previous || previous.handle !== row.handle || previous.display_name !== row.displayName || previous.followers !== nextFollowers || previous.following !== nextFollowing || previous.posts !== nextPosts || previous.fetched_at !== canonicalDailyFetchedAt(row.date) || previous.origin !== nextOrigin) changedRows.push(row);
   }
-  const statements = [...grouped.values()].map((row) => database.prepare(`INSERT INTO xstats_daily_history
+  if (!changedRows.length) return;
+  const statements = changedRows.map((row) => database.prepare(`INSERT INTO xstats_daily_history
     (id, session_id, date, account_id, handle, display_name, followers, following, posts, fetched_at, origin, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(session_id, account_id, date) DO UPDATE SET
       handle = excluded.handle,
       display_name = excluded.display_name,
@@ -434,9 +476,51 @@ export async function upsertImportedDailyHistory(database: D1Database, sessionId
       fetched_at = excluded.fetched_at,
       updated_at = excluded.updated_at,
       origin = CASE WHEN xstats_daily_history.origin = 'manual' THEN xstats_daily_history.origin ELSE excluded.origin END`)
-    .bind(stableDailyHistoryId(row.accountId, row.date), sessionId, row.date, row.accountId, row.handle, row.displayName, row.followers ?? null, row.following ?? null, row.posts ?? null, canonicalDailyFetchedAt(row.date), updatedAt));
+    .bind(stableDailyHistoryId(row.accountId, row.date), sessionId, row.date, row.accountId, row.handle, row.displayName, row.followers ?? null, row.following ?? null, row.posts ?? null, canonicalDailyFetchedAt(row.date), origin, updatedAt));
   for (const statementChunk of chunk(statements, 80)) if (statementChunk.length) await database.batch(statementChunk);
-  if (changed) await database.prepare("UPDATE xstats_daily_history_meta SET revision = revision + 1, updated_at = ? WHERE session_id = ?").bind(updatedAt, sessionId).run();
+  await database.prepare("UPDATE xstats_daily_history_meta SET revision = revision + 1, updated_at = ? WHERE session_id = ?").bind(updatedAt, sessionId).run();
+}
+
+export async function upsertImportedDailyHistory(database: D1Database, sessionId: string, rows: DailyHistoryUpsertRow[], updatedAt = new Date().toISOString()) {
+  return upsertDailyHistoryRows(database, sessionId, rows, "imported", updatedAt);
+}
+
+export type AcquiredDailyHistoryInput = Omit<DailyHistoryUpsertRow, "date"> & { fetchedAt: string };
+
+/** Save only valid metrics from a successful profile response into its daily bucket. */
+export async function upsertAcquiredDailyHistory(database: D1Database, sessionId: string, rows: AcquiredDailyHistoryInput[], updatedAt = new Date().toISOString()) {
+  const grouped = new Map<string, DailyHistoryUpsertRow & { metricAt: Record<DailyHistoryMetric, number>; latestIdentityAt: number }>();
+  for (const row of rows) {
+    const date = dailyRecordDate(row.fetchedAt);
+    if (!date || !row.accountId || !row.handle || !row.displayName) continue;
+    const key = `${row.accountId}|${date}`;
+    const fetchedAt = new Date(row.fetchedAt).getTime();
+    const current = grouped.get(key) ?? {
+      date,
+      accountId: row.accountId,
+      handle: row.handle,
+      displayName: row.displayName,
+      followers: null,
+      following: null,
+      posts: null,
+      metricAt: { followers: -Infinity, following: -Infinity, posts: -Infinity },
+      latestIdentityAt: -Infinity,
+    };
+    for (const metric of DAILY_HISTORY_METRICS) {
+      const value = row[metric];
+      if (value !== null && value !== undefined && Number.isFinite(fetchedAt) && fetchedAt >= current.metricAt[metric]) {
+        current[metric] = value;
+        current.metricAt[metric] = fetchedAt;
+      }
+    }
+    if (Number.isFinite(fetchedAt) && fetchedAt >= current.latestIdentityAt) {
+      current.handle = row.handle;
+      current.displayName = row.displayName;
+      current.latestIdentityAt = fetchedAt;
+    }
+    if (current.followers !== null || current.following !== null || current.posts !== null) grouped.set(key, current);
+  }
+  return upsertDailyHistoryRows(database, sessionId, [...grouped.values()], "acquired", updatedAt);
 }
 
 type RawSnapshot = {
@@ -465,8 +549,9 @@ export async function loadEffectiveHistory(database: D1Database, sessionId: stri
   const statusColumns = await database.prepare('PRAGMA table_info("xstats_account_statuses")').all<{ name: string }>();
   const freezeDateColumn = statusColumns.results.some((column) => column.name === "freeze_date") ? "statuses.freeze_date" : "NULL";
 
+  const meta = await database.prepare("SELECT backfilled FROM xstats_daily_history_meta WHERE session_id = ?").bind(sessionId).first<{ backfilled: number }>();
   const [raw, daily] = await Promise.all([
-    database.prepare(`SELECT snapshots.id, snapshots.run_id, snapshots.fetched_at, snapshots.account_id, snapshots.handle, snapshots.display_name,
+    (meta?.backfilled ?? 0) >= 3 ? Promise.resolve({ results: [] as RawSnapshot[] }) : database.prepare(`SELECT snapshots.id, snapshots.run_id, snapshots.fetched_at, snapshots.account_id, snapshots.handle, snapshots.display_name,
       snapshots.followers, snapshots.following, snapshots.posts, COALESCE(assets.avatar_url, ${snapshotAvatarUrl}) AS avatar_url,
       COALESCE(statuses.status, 'active') AS account_status, statuses.joined_at AS joined, ${freezeDateColumn} AS freeze_date
       FROM xstats_snapshots AS snapshots LEFT JOIN xstats_account_assets AS assets

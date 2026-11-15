@@ -1,5 +1,5 @@
 import { unzipSync, zipSync } from "fflate";
-import { threeHourExportBucket, type ThreeHourExportBucket } from "./export-buckets.ts";
+import { dailyExportBucket, type DailyExportBucket } from "./export-buckets.ts";
 import { LEGACY_WORKBOOK_SHEET_ALIASES, MANAGED_WORKBOOK_SHEETS, WORKBOOK_SHEETS, workbookSheetCandidates } from "./workbook-sheet-names.ts";
 
 const textDecoder = new TextDecoder();
@@ -197,7 +197,7 @@ function dateHeaderInfo(value: string | number | null, fullHistory: boolean) {
   if (!canonical) return null;
   if (!fullHistory) return { key: canonical, label: String(value) };
   const date = new Date(`${canonical.replace(" ", "T")}:00+09:00`);
-  const bucket = threeHourExportBucket(date);
+  const bucket = dailyExportBucket(date);
   return bucket ? { key: bucket.key, label: bucket.label, bucket } : null;
 }
 
@@ -292,8 +292,8 @@ function mergeHistoryWorksheet(sourceXml: string, generatedXml: string, sheetNam
   const generatedHeader = generatedRows.get(1) ?? new Map();
   const sourceDates = new Map<string, number>();
   const generatedDates = new Map<string, number>();
-  const sourceDateInfo = new Map<number, { key: string; label: string; bucket?: ThreeHourExportBucket }>();
-  const sourceBucketColumns = new Map<string, Array<{ column: number; bucket: ThreeHourExportBucket }>>();
+  const sourceDateInfo = new Map<number, { key: string; label: string; bucket?: DailyExportBucket }>();
+  const sourceBucketColumns = new Map<string, Array<{ column: number; bucket: DailyExportBucket }>>();
   const duplicateSourceColumns = new Set<number>();
   for (const [column, cell] of sourceHeader) {
     if (column < 4) continue;
@@ -312,9 +312,8 @@ function mergeHistoryWorksheet(sourceXml: string, generatedXml: string, sheetNam
     }
   }
 
-  // Existing exports may contain several timestamp columns in one three-hour
-  // slot. Collapse those columns before applying the new site values, keeping
-  // the value closest to the slot's JST endpoint for each account.
+  // Older exports may contain multiple timestamps in one daily bucket. Fold
+  // them into the daily column, keeping the latest valid value per account.
   const collapsedSourceValues = new Map<string, string | number | null>();
   for (const [key, candidates] of sourceBucketColumns) {
     const targetColumn = sourceDates.get(key);
@@ -324,7 +323,7 @@ function mergeHistoryWorksheet(sourceXml: string, generatedXml: string, sheetNam
       const populated = candidates
         .map((candidate) => ({ candidate, cell: cells.get(candidate.column) }))
         .filter((item) => item.cell?.value !== null && item.cell?.value !== undefined && item.cell?.value !== "")
-        .sort((left, right) => left.candidate.bucket.distance - right.candidate.bucket.distance || right.candidate.bucket.fetchedAt - left.candidate.bucket.fetchedAt);
+        .sort((left, right) => right.candidate.bucket.fetchedAt - left.candidate.bucket.fetchedAt || right.candidate.column - left.candidate.column);
       const winner = populated[0]?.cell;
       if (!winner) continue;
       collapsedSourceValues.set(`${row}:${targetColumn}`, winner.value);

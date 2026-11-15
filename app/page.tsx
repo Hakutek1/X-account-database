@@ -1442,8 +1442,12 @@ export default function Home() {
       setHistoryRows(payload.rows ?? []);
       setLatestCollection(payload.latestCollection ?? null);
       setRegisteredAccountCount(typeof payload.registeredAccountCount === "number" && Number.isSafeInteger(payload.registeredAccountCount) && payload.registeredAccountCount >= 0 ? payload.registeredAccountCount : null);
-      const latestRunId = payload.runs?.[0]?.id ?? (payload.rows ?? []).reduce((latest, row) => row.fetched_at > latest.fetched_at ? row : latest, { fetched_at: "", run_id: "" }).run_id;
-      const latestHistoricalRows = (payload.rows ?? []).filter((row) => row.run_id === latestRunId);
+      const latestByAccount = new Map<string, HistoryRow>();
+      for (const row of buildDailyChartRows(payload.rows ?? [])) {
+        const current = latestByAccount.get(row.account_id);
+        if (!current || row.fetched_at > current.fetched_at) latestByAccount.set(row.account_id, row);
+      }
+      const latestHistoricalRows = [...latestByAccount.values()];
       if (latestHistoricalRows.length) {
         setRows((current) => latestHistoricalRows.map((row) => {
             const previous = current.find((item) => item.id === row.account_id || item.handle.toLowerCase() === row.handle.toLowerCase());
@@ -2163,12 +2167,16 @@ export default function Home() {
     setIsExporting(true);
     setNotice({ tone: "info", message: `${FRESH_WORKBOOK_SHEETS.length}シートのExcelを準備しています…` });
     try {
-      const latestRunId = historyRows.reduce((latest, row) => row.fetched_at > latest.fetched_at ? row : latest, historyRows[0] ?? { fetched_at: "", run_id: "" }).run_id;
-      const latestHistoryRows = historyRows.filter((row) => row.run_id === latestRunId);
-      const latestRowsForExport: ExportRow[] = latestHistoryRows.map((row) => ({ fetchedAt: row.fetched_at, accountId: row.account_id, handle: row.handle, displayName: resolvedDisplayName(row, displayNameOverrides), accountStatus: row.account_status, followers: row.followers, following: row.following, posts: row.posts }));
-      const historyRowsForExport: ExportRow[] = historyRows.map((row) => ({ fetchedAt: row.fetched_at, accountId: row.account_id, handle: row.handle, displayName: resolvedDisplayName(row, displayNameOverrides), accountStatus: row.account_status, followers: row.followers, following: row.following, posts: row.posts }));
-      const allHistoryRows = [...historyRowsForExport, ...latestRowsForExport];
-      const generated = buildFreshWorkbook({ latestRows: latestRowsForExport, historyRows: allHistoryRows });
+      const dailyRows = buildDailyChartRows(historyRows);
+      const latestByAccount = new Map<string, HistoryRow>();
+      for (const row of dailyRows) {
+        const current = latestByAccount.get(row.account_id);
+        if (!current || row.fetched_at > current.fetched_at) latestByAccount.set(row.account_id, row);
+      }
+      const toExportRow = (row: HistoryRow): ExportRow => ({ fetchedAt: row.fetched_at, accountId: row.account_id, handle: row.handle, displayName: resolvedDisplayName(row, displayNameOverrides), accountStatus: row.account_status, followers: row.followers, following: row.following, posts: row.posts });
+      const latestRowsForExport = [...latestByAccount.values()].map(toExportRow);
+      const historyRowsForExport = dailyRows.map(toExportRow);
+      const generated = buildFreshWorkbook({ latestRows: latestRowsForExport, historyRows: historyRowsForExport });
       if (generated.sheetNames.length !== FRESH_WORKBOOK_SHEETS.length) throw new Error(`Excelのシート数が${FRESH_WORKBOOK_SHEETS.length}ではありません（${generated.sheetNames.length}シート）。`);
       const outputWorkbook = XLSX.read(generated.bytes, { type: "array", cellStyles: true });
       const exportHistorySheets = new Set<string>([
@@ -2185,7 +2193,7 @@ export default function Home() {
       anchor.download = `複垢データベース${formatWorkbookFileDate()}.xlsx`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setNotice({ tone: "success", message: `Excelに${FRESH_WORKBOOK_SHEETS.length}シートを書き出しました。D1履歴データ${allHistoryRows.length ? `（${allHistoryRows.length}件）` : ""}を確認済みです。` });
+      setNotice({ tone: "success", message: `Excelに${FRESH_WORKBOOK_SHEETS.length}シートを書き出しました。D1日次履歴${historyRowsForExport.length ? `（${historyRowsForExport.length}件）` : ""}を確認済みです。` });
     } catch (error) {
       setNotice({ tone: "error", message: error instanceof Error ? error.message : "xlsxの作成に失敗しました。" });
     } finally {
