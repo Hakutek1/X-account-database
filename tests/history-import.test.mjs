@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
 import { unzipSync } from "fflate";
-import { threeHourExportBucket } from "../lib/export-buckets.ts";
+import { dailyExportBucket } from "../lib/export-buckets.ts";
 import { availableImportCandidates, mergeImportedSnapshots, parseDailyHistoryWorkbook, parseSourceWorkbook } from "../lib/history-import.ts";
 import { WORKBOOK_SHEETS } from "../lib/workbook-sheet-names.ts";
 import { mergeIncrementalWorkbook, mergeTemplateWorkbook } from "../lib/xlsx-template.ts";
@@ -49,16 +49,36 @@ test("daily history parser exposes Excel-only accounts and two-digit date header
   ]);
 });
 
-test("three-hour export buckets use JST endpoints and keep the closest sample", () => {
-  assert.equal(threeHourExportBucket("2026-07-23T10:07:00+09:00")?.label, "26/07/23 12:00");
-  assert.equal(threeHourExportBucket("2026-07-23T12:00:00+09:00")?.label, "26/07/23 12:00");
-  assert.equal(threeHourExportBucket("2026-07-23T12:00:00.001+09:00")?.label, "26/07/23 15:00");
-  assert.equal(threeHourExportBucket("2026-07-23T21:00:00+09:00")?.label, "26/07/23 21:00");
-  assert.equal(threeHourExportBucket("2026-07-23T21:00:00.001+09:00")?.label, "26/07/24 00:00");
-  const earlier = threeHourExportBucket("2026-07-23T19:07:00+09:00");
-  const later = threeHourExportBucket("2026-07-23T20:31:00+09:00");
+test("Excel timestamp headers use the same daily JST bucket as saved history", () => {
+  assert.equal(dailyExportBucket("2026-07-23T00:00:00+09:00")?.key, "2026-07-23");
+  assert.equal(dailyExportBucket("2026-07-23T00:00:59+09:00")?.key, "2026-07-23");
+  assert.equal(dailyExportBucket("2026-07-23T00:01:00+09:00")?.key, "2026-07-24");
+  assert.equal(dailyExportBucket("2026-07-23T21:00:00+09:00")?.label, "26/07/24");
+  assert.equal(dailyExportBucket("2026-07-23T23:59:00+09:00")?.key, "2026-07-24");
+  const earlier = dailyExportBucket("2026-07-23T19:07:00+09:00");
+  const later = dailyExportBucket("2026-07-23T20:31:00+09:00");
   assert.equal(earlier?.key, later?.key);
-  assert.ok((later?.distance ?? Infinity) < (earlier?.distance ?? -Infinity));
+  assert.ok((later?.fetchedAt ?? -Infinity) > (earlier?.fetchedAt ?? Infinity));
+});
+
+test("Excel imports map timed JST headers to the same next-day daily bucket", () => {
+  const workbook = XLSX.utils.book_new();
+  const headers = [
+    "名称",
+    "2026-07-20T00:00:00+09:00",
+    "2026-07-20T00:01:00+09:00",
+    "26/07/20 19:07",
+    excelSerial(2026, 7, 20) + (19 * 60 + 7) / 1440,
+  ];
+  for (const name of ["フォロワー数", "フォロー数", "ポスト数"]) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([headers, ["アカウント", 1, 2, 3, 4]]), name);
+  }
+  const preview = parseSourceWorkbook(workbook);
+  assert.deepEqual(preview.dateColumns, ["2026-07-20", "2026-07-21"]);
+  assert.equal(preview.observations.find((row) => row.value === 1)?.date, "2026-07-20");
+  assert.equal(preview.observations.find((row) => row.value === 2)?.date, "2026-07-21");
+  assert.equal(preview.observations.find((row) => row.value === 3)?.date, "2026-07-21");
+  assert.equal(preview.observations.find((row) => row.value === 4)?.date, "2026-07-21");
 });
 
 test("import merge keeps one account/date snapshot, gives source values precedence, and tracks metric sources independently", () => {
@@ -164,14 +184,14 @@ function generatedHistoryWorkbook() {
   return XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
 }
 
-function threeHourHistoryWorkbook() {
+function dailyHistoryWorkbook() {
   const workbook = XLSX.utils.book_new();
   const sourceRows = [
-    ["アカウントID", "ハンドル", "表示名", "26/07/22 19:07", "26/07/22 20:31", "26/07/23 19:07", "26/07/23 20:31"],
+    ["アカウントID", "ハンドル", "表示名", "26/07/20 19:07", "26/07/20 20:31", "26/07/21 19:07", "26/07/21 20:31"],
     ["id-a", "@alpha", "Alpha", 10, 20, 30, 40],
   ];
   const generatedRows = [
-    ["アカウントID", "ハンドル", "表示名", "26/07/22 21:00", "26/07/23 21:00"],
+    ["アカウントID", "ハンドル", "表示名", "26/07/20 21:00", "26/07/21 21:00"],
     ["id-a", "@alpha", "Alpha", 99, 88],
   ];
   for (const name of [WORKBOOK_SHEETS.fullFollowers, WORKBOOK_SHEETS.fullFollowing, WORKBOOK_SHEETS.fullPosts]) XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sourceRows), name);
@@ -182,18 +202,18 @@ function threeHourHistoryWorkbook() {
   const generated = XLSX.utils.book_new();
   for (const name of [WORKBOOK_SHEETS.fullFollowers, WORKBOOK_SHEETS.fullFollowing, WORKBOOK_SHEETS.fullPosts]) XLSX.utils.book_append_sheet(generated, XLSX.utils.aoa_to_sheet(generatedRows), name);
   for (const name of [WORKBOOK_SHEETS.dailyFollowers, WORKBOOK_SHEETS.dailyFollowing, WORKBOOK_SHEETS.dailyPosts]) XLSX.utils.book_append_sheet(generated, XLSX.utils.aoa_to_sheet([["アカウントID", "ハンドル", "表示名"]]), name);
-  XLSX.utils.book_append_sheet(generated, XLSX.utils.aoa_to_sheet([["取得日時", "アカウントID"], ["26/07/23 21:00", "id-a"]]), WORKBOOK_SHEETS.latest);
+  XLSX.utils.book_append_sheet(generated, XLSX.utils.aoa_to_sheet([["取得日時", "アカウントID"], ["26/07/21 21:00", "id-a"]]), WORKBOOK_SHEETS.latest);
   XLSX.utils.book_append_sheet(generated, XLSX.utils.aoa_to_sheet([["状態"], ["確認事項なし"]]), "統合要確認");
   return { template: XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true }), generated: XLSX.write(generated, { bookType: "xlsx", type: "array", cellStyles: true }) };
 }
 
-test("incremental full-history merge removes duplicate timestamp columns and keeps the closest value", () => {
-  const { template, generated } = threeHourHistoryWorkbook();
+test("incremental full-history merge folds timestamp columns into daily buckets and keeps the latest value", () => {
+  const { template, generated } = dailyHistoryWorkbook();
   const result = mergeIncrementalWorkbook(template, generated);
   const merged = XLSX.read(result.bytes, { type: "buffer" });
   const rows = XLSX.utils.sheet_to_json(merged.Sheets[WORKBOOK_SHEETS.fullFollowers], { header: 1, raw: true });
-  assert.deepEqual(rows[0], ["アカウントID", "ハンドル", "表示名", "26/07/22 21:00", "26/07/23 21:00"]);
-  assert.deepEqual(rows[1], ["id-a", "@alpha", "Alpha", 20, 88], "各3時間枠の終了時刻に近い値だけを残し、サイト優先日だけ更新する");
+  assert.deepEqual(rows[0], ["アカウントID", "ハンドル", "表示名", "26/07/21", "26/07/22"]);
+  assert.deepEqual(rows[1], ["id-a", "@alpha", "Alpha", 20, 40], "同じ日付に複数値がある場合は最後の取得値を残す");
 });
 
 test("incremental workbook merge uses date headers instead of column positions and preserves manual history", () => {
@@ -210,11 +230,11 @@ test("incremental workbook merge uses date headers instead of column positions a
   const merged = XLSX.read(result.bytes, { type: "buffer", cellFormula: true });
   assert.equal(merged.Sheets["分析シート"].B1.f, "1+1");
   const followers = XLSX.utils.sheet_to_json(merged.Sheets["全履歴_フォロワー"], { header: 1, raw: true });
-  assert.deepEqual(followers[0].slice(0, 6), ["アカウントID", "ハンドル", "表示名", "26/07/22 12:00", "手動メモ", "26/07/23 12:00"]);
-  assert.equal(followers[1][3], 100, "2026/07/22以前は既存Excel値を優先");
-  assert.equal(followers[1][5], 301, "2026/07/23以降はサイト値を優先");
+  assert.deepEqual(followers[0].slice(0, 6), ["アカウントID", "ハンドル", "表示名", "26/07/23", "手動メモ", "26/07/24"]);
+  assert.equal(followers[1][3], 999, "日次レコード日がサイト優先日以降ならサイト値を採用");
+  assert.equal(followers[1][5], 301, "後続の日次バケットもサイト値を採用");
   assert.equal(followers[2][0], "id-dup", "重複行は削除しない");
-  assert.equal(followers[2][3], 101, "重複行でも境界日前の既存値は保持する");
+  assert.equal(followers[2][3], 777, "重複IDの先頭行ではそのIDの日次サイト値を採用する");
   assert.equal(followers[2][5], 778, "重複行でも先頭行へ最新サイト値を反映する");
   assert.equal(followers[3][5], 202, "重複行の2行目は削除・改変しない");
   assert.equal(followers.some((row) => row[0] === "id-old"), true, "手動Excelだけのアカウントを保持する");

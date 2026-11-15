@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { ensureOpeningDateHistory } from "../lib/daily-history.ts";
 
-function fakeDatabase({ openingDates = [], identities = [], dailyRows = [], snapshots = [] } = {}) {
+function fakeDatabase({ openingDates = [], identities = [], dailyRows = [] } = {}) {
   const executed = [];
   const batched = [];
   const statementFor = (sql) => {
@@ -13,10 +13,8 @@ function fakeDatabase({ openingDates = [], identities = [], dailyRows = [], snap
           bindArgs: args,
           all: async () => {
             if (sql.includes("joined_at") && sql.includes("FROM xstats_account_statuses")) return { results: openingDates };
-            if (sql.includes("FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id")) return { results: identities.filter((row) => row.source !== "daily") };
             if (sql.includes("FROM xstats_daily_history WHERE session_id = ? GROUP BY account_id")) return { results: identities.filter((row) => row.source === "daily") };
             if (sql.includes("SELECT account_id, date, handle, display_name")) return { results: dailyRows };
-            if (sql.includes("SELECT account_id, handle, display_name, fetched_at")) return { results: snapshots };
             return { results: [] };
           },
           run: async () => {
@@ -46,7 +44,7 @@ function fakeDatabase({ openingDates = [], identities = [], dailyRows = [], snap
 test("opening date history creates zero values when the opening date has no record", async () => {
   const database = fakeDatabase({
     openingDates: [{ account_id: "a", joined_at: "2026-07-01T00:00:00.000Z" }],
-    identities: [{ account_id: "a", handle: "alpha", display_name: "Alpha", source: "snapshot" }],
+    identities: [{ account_id: "a", handle: "alpha", display_name: "Alpha", source: "daily" }],
   });
 
   const changed = await ensureOpeningDateHistory(database, "shared", "2026-07-02");
@@ -72,7 +70,7 @@ test("opening date history creates zero values when the opening date has no reco
 test("opening date history keeps existing numbers and fills only missing metrics", async () => {
   const database = fakeDatabase({
     openingDates: [{ account_id: "a", joined_at: "2026-07-01T00:00:00.000Z" }],
-    identities: [{ account_id: "a", handle: "alpha", display_name: "Alpha", source: "snapshot" }],
+    identities: [{ account_id: "a", handle: "alpha", display_name: "Alpha", source: "daily" }],
     dailyRows: [{ account_id: "a", date: "2026-07-01", handle: "alpha", display_name: "Alpha", followers: 12, following: null, posts: 8 }],
   });
 
@@ -85,8 +83,8 @@ test("opening date history keeps existing numbers and fills only missing metrics
 test("opening date history preserves a partial raw value and zeros missing metrics", async () => {
   const database = fakeDatabase({
     openingDates: [{ account_id: "a", joined_at: "2026-07-01T00:00:00.000Z" }],
-    identities: [{ account_id: "a", handle: "alpha", display_name: "Alpha", source: "snapshot" }],
-    snapshots: [{ account_id: "a", handle: "alpha", display_name: "Alpha", fetched_at: "2026-06-30T16:00:00.000Z", followers: 12, following: null, posts: null }],
+    identities: [{ account_id: "a", handle: "alpha", display_name: "Alpha", source: "daily" }],
+    dailyRows: [{ account_id: "a", date: "2026-07-01", handle: "alpha", display_name: "Alpha", followers: 12, following: null, posts: null }],
   });
 
   const changed = await ensureOpeningDateHistory(database, "shared", "2026-07-02");

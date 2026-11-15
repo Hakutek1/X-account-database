@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { dailyRecordDate } from "./daily-history.ts";
 import { DAILY_HISTORY_SHEET_METRICS, workbookSheetCandidates } from "./workbook-sheet-names.ts";
 
 export const IMPORT_CUTOFF = "2026-07-22";
@@ -88,32 +89,45 @@ const SHEET_METRICS: Array<[string, ImportMetric]> = [
   ["ポスト数", "posts"],
 ];
 
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 
 export function normalizeSourceName(value: string) {
   return value.normalize("NFKC").trim().replace(/\s+/g, "").toLocaleLowerCase("ja-JP");
 }
 
 function excelSerialToDate(serial: number) {
-  const timestamp = Date.UTC(1899, 11, 30) + serial * 86400000;
+  const timestamp = EXCEL_EPOCH_MS + serial * 86400000;
   const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+  if (Number.isNaN(date.getTime())) return null;
+  const fraction = serial - Math.floor(serial);
+  // Date-only spreadsheet headers remain on their written calendar date.
+  // Timed headers are wall-clock JST values and follow the daily bucket used
+  // by profile collection and workbook export.
+  if (fraction < 1e-10) return new Date(EXCEL_EPOCH_MS + Math.floor(serial) * 86400000).toISOString().slice(0, 10);
+  return dailyRecordDate(new Date(timestamp - 9 * 60 * 60 * 1000).toISOString());
 }
 
 function sourceDate(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return excelSerialToDate(value);
-  if (value instanceof Date && Number.isFinite(value.getTime())) return new Date(value.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+  if (value instanceof Date && Number.isFinite(value.getTime())) return dailyRecordDate(value.toISOString());
   if (typeof value !== "string") return null;
-  const isoMatch = value.trim().match(/^\d{4}-\d{2}-\d{2}(?:T|\s)/);
-  if (isoMatch) {
-    const parsed = new Date(value);
-    if (Number.isFinite(parsed.getTime())) return new Date(parsed.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+  const raw = value.trim();
+  const isoTimestamp = raw.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})?$/i);
+  if (isoTimestamp) {
+    const parsed = new Date(isoTimestamp[3] ? raw.replace(" ", "T") : `${isoTimestamp[1]}T${isoTimestamp[2]}+09:00`);
+    return Number.isFinite(parsed.getTime()) ? dailyRecordDate(parsed.toISOString()) : null;
   }
-  const normalized = value.trim().replaceAll(".", "/").replaceAll("-", "/");
-  const match = normalized.match(/^(\d{2}|\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  const normalized = raw.replaceAll(".", "/").replaceAll("-", "/");
+  const match = normalized.match(/^(\d{2}|\d{4})\/(\d{1,2})\/(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if (!match) return null;
   const year = match[1].length === 2 ? `20${match[1]}` : match[1];
   const date = `${year}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+  if (match[4]) {
+    const hour = match[4].padStart(2, "0");
+    const second = match[6]?.padStart(2, "0") ?? "00";
+    const timestamp = new Date(`${date}T${hour}:${match[5]}:${second}+09:00`);
+    return Number.isFinite(timestamp.getTime()) ? dailyRecordDate(timestamp.toISOString()) : null;
+  }
   const parsed = new Date(`${date}T00:00:00Z`);
   return /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : null;
 }
@@ -256,13 +270,6 @@ export function availableImportCandidates(item: ImportReviewItem, mappings: Read
   return item.candidates.filter((candidate) => candidate.accountId === selectedAccountId || !selectedElsewhere.has(candidate.accountId));
 }
 
-function jstCalendarDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Tokyo" }).formatToParts(date).map((part) => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
 function importedTimestamp(date: string) {
   return new Date(`${date}T00:00:00.001+09:00`).toISOString();
 }
@@ -288,7 +295,7 @@ export function mergeImportedSnapshots(preview: SourceImportPreview, mappings: A
     for (const observation of sourceObservations) {
       const key = `${mapping.accountId}|${observation.date}`;
       const current = grouped.get(key) ?? (() => {
-        const sameDay = existingRows.filter((row) => row.account_id === mapping.accountId && jstCalendarDate(row.fetched_at) === observation.date).sort((left, right) => new Date(right.fetched_at).getTime() - new Date(left.fetched_at).getTime())[0];
+        const sameDay = existingRows.filter((row) => row.account_id === mapping.accountId && dailyRecordDate(row.fetched_at) === observation.date).sort((left, right) => new Date(right.fetched_at).getTime() - new Date(left.fetched_at).getTime())[0];
         return {
           date: observation.date,
           fetchedAt: importedTimestamp(observation.date),
@@ -307,7 +314,7 @@ export function mergeImportedSnapshots(preview: SourceImportPreview, mappings: A
       const sourceMetricKey = `${observation.sourceName}|${observation.metric}`;
       const hasSourceMetric = current.sourceMetrics.has(sourceMetricKey);
       if (metricBefore !== null && metricBefore !== observation.value && !hasSourceMetric) {
-        const sameDaySite = existingRows.find((row) => row.account_id === mapping.accountId && jstCalendarDate(row.fetched_at) === observation.date);
+        const sameDaySite = existingRows.find((row) => row.account_id === mapping.accountId && dailyRecordDate(row.fetched_at) === observation.date);
         issues.push({ issueType: "conflict", sourceSheet: observation.sourceSheet, sourceName: observation.sourceName, accountId: mapping.accountId, handle: mapping.handle, displayName: mapping.displayName, date: observation.date, metric: observation.metric, sourceValue: observation.value, siteValue: metricBefore, details: "同じアカウント・同じ日付のため、元Excelの値を採用しました。" });
         if (!sameDaySite) issues.pop();
       }

@@ -1,4 +1,4 @@
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin } from "../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin } from "../_shared";
 import { MAX_ACCOUNTS, parseInputs } from "../../../lib/x-stats";
 import { collectForSession } from "../../../lib/collection";
 import { ensureAccountStatuses, loadAccountFreezeDateMap, loadAccountJoinedMap, loadAccountStatusMap } from "../../../lib/account-status";
@@ -38,7 +38,6 @@ export async function POST(request: Request) {
     await ensureAccountStatuses(db, session.id, accountIds.results.map((row) => row.account_id));
     await ensureDailyPostsThroughToday(db, session.id);
     await ensureOpeningDateHistory(db, session.id);
-    await pruneSessionHistory(db, session.id);
     const statusById = await loadAccountStatusMap(db, session.id);
     const joinedById = await loadAccountJoinedMap(db, session.id);
     const freezeDateById = await loadAccountFreezeDateMap(db, session.id);

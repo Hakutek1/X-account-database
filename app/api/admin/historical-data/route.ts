@@ -1,7 +1,7 @@
 import { dailyRecordDate, ensureDailyHistory, ensureDailyPostsThroughToday, ensureOpeningDateHistory, loadDailyHistory, loadDailyHistoryMeta, type DailyHistoryMetric, type DailyHistoryRow } from "../../../../lib/daily-history";
 import { loadAccountAssets } from "../../../../lib/account-assets";
 import { ensureAccountStatuses, isAccountStatus, loadAccountFreezeDateMap, loadAccountJoinedMap, loadAccountStatusMap, type AccountStatus } from "../../../../lib/account-status";
-import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, pruneSessionHistory, requireAdmin } from "../../_shared";
+import { ensureSchema, ensureSharedSession, getD1, getSharedSession, json, requireAdmin } from "../../_shared";
 
 const METRICS = new Set<DailyHistoryMetric>(["followers", "following", "posts"]);
 const MAX_ACCOUNTS = 500;
@@ -145,12 +145,14 @@ async function prepareEditorContext() {
   const session = getSharedSession();
   await ensureSharedSession(db);
   await ensureDailyHistory(db, session.id);
-  const accountIds = await db.prepare(`SELECT account_id FROM xstats_snapshots WHERE session_id = ?
-    UNION SELECT account_id FROM xstats_daily_history WHERE session_id = ?`).bind(session.id, session.id).all<{ account_id: string }>();
+  const backfillMeta = await loadDailyHistoryMeta(db, session.id);
+  const accountIds = backfillMeta.backfilled >= 3
+    ? await db.prepare("SELECT account_id FROM xstats_daily_history WHERE session_id = ? GROUP BY account_id").bind(session.id).all<{ account_id: string }>()
+    : await db.prepare(`SELECT account_id FROM xstats_snapshots WHERE session_id = ?
+      UNION SELECT account_id FROM xstats_daily_history WHERE session_id = ?`).bind(session.id, session.id).all<{ account_id: string }>();
   await ensureAccountStatuses(db, session.id, accountIds.results.map((row) => row.account_id));
   await ensureDailyPostsThroughToday(db, session.id);
   await ensureOpeningDateHistory(db, session.id);
-  await pruneSessionHistory(db, session.id);
   return { db, session };
 }
 
@@ -162,13 +164,16 @@ export async function GET(request: Request) {
   try {
     const db = getD1();
     const session = getSharedSession();
-    const [dailyRows, meta, snapshots, assets, exclusions] = await Promise.all([
+    const [dailyRows, meta, assets, exclusions, snapshotIdentities] = await Promise.all([
       loadDailyHistory(db, session.id),
       loadDailyHistoryMeta(db, session.id),
-      db.prepare("SELECT account_id, handle, display_name, fetched_at, followers, following, posts FROM xstats_snapshots WHERE session_id = ? ORDER BY fetched_at ASC").bind(session.id).all<SnapshotForEditor>(),
       loadAccountAssets(db, session.id),
       db.prepare("SELECT account_id FROM xstats_historical_account_exclusions WHERE session_id = ?").bind(session.id).all<{ account_id: string }>(),
+      db.prepare("SELECT account_id, handle, display_name FROM xstats_snapshots WHERE session_id = ? GROUP BY account_id").bind(session.id).all<SnapshotIdentity>(),
     ]);
+    const snapshots = meta.backfilled >= 3
+      ? { results: [] as SnapshotForEditor[] }
+      : await db.prepare("SELECT account_id, handle, display_name, fetched_at, followers, following, posts FROM xstats_snapshots WHERE session_id = ? ORDER BY fetched_at ASC").bind(session.id).all<SnapshotForEditor>();
     const [statusByAccount, freezeDateByAccount] = await Promise.all([
       loadAccountStatusMap(db, session.id),
       loadAccountFreezeDateMap(db, session.id),
@@ -177,7 +182,7 @@ export async function GET(request: Request) {
     const visibleDailyRows = dailyRows.filter((row) => !excludedIds.has(row.account_id));
     const visibleSnapshots = snapshots.results.filter((row) => !excludedIds.has(row.account_id));
     const avatarByAccount = new Map(assets.map((asset) => [asset.account_id, asset.avatar_url]));
-    const accounts = identityMap(visibleSnapshots, visibleDailyRows);
+    const accounts = identityMap([...snapshotIdentities.results, ...visibleSnapshots], visibleDailyRows);
     const dates = new Set<string>();
     const values: Record<string, Record<string, number | null>> = {};
     for (const row of visibleDailyRows) {
@@ -188,6 +193,7 @@ export async function GET(request: Request) {
       values[row.account_id][row.date] = value;
     }
     for (const snapshot of visibleSnapshots) {
+      if (meta.backfilled >= 3) continue;
       const date = dailyRecordDate(snapshot.fetched_at);
       if (!date || date <= "2026-07-22") continue;
       const value = snapshot[metric];
@@ -414,7 +420,7 @@ export async function PUT(request: Request) {
     const removedIds = [...removedAccountIds];
     if (removedIds.length) {
       const idBatches = splitJsonBatches(removedIds);
-      for (const table of ["xstats_snapshots", "xstats_import_mappings", "xstats_import_issues", "xstats_account_assets", "xstats_account_statuses"]) {
+      for (const table of ["xstats_import_mappings", "xstats_import_issues", "xstats_account_assets", "xstats_account_statuses"]) {
         for (const batch of idBatches) {
           statements.push(db.prepare(`DELETE FROM ${table} WHERE session_id = ? AND account_id IN (SELECT value FROM json_each(?)) AND ${guard}`).bind(session.id, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
         }
@@ -451,7 +457,7 @@ export async function PUT(request: Request) {
           fetched_at = excluded.fetched_at, origin = excluded.origin, updated_at = excluded.updated_at`).bind(session.id, JSON.stringify(batch), session.id, expectedRevision + 1, writeMarker));
     }
     for (const batch of splitJsonBatches(identityChanges)) {
-      for (const table of ["xstats_snapshots", "xstats_import_mappings", "xstats_import_issues"]) {
+      for (const table of ["xstats_import_mappings", "xstats_import_issues"]) {
         statements.push(db.prepare(`UPDATE ${table} AS target
           SET account_id = json_extract(mapping.value, '$.accountId'),
               handle = json_extract(mapping.value, '$.handle'),

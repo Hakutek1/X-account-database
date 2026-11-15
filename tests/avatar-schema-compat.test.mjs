@@ -12,6 +12,10 @@ function makeDatabase({ hasAvatarColumn, avatarUrl = null }) {
         queries.push(query);
         return {
           bind() { return this; },
+          async first() {
+            if (query.includes("xstats_daily_history_meta")) return null;
+            throw new Error(`Unexpected first query: ${query}`);
+          },
           async all() {
             if (query.startsWith('PRAGMA table_info("xstats_snapshots")')) {
               return { results: hasAvatarColumn ? [{ name: "avatar_url" }] : [] };

@@ -34,10 +34,11 @@ function countStoredTargets(handlesJson: string | null | undefined) {
   }
 }
 
-function isImportedRun(sourceSummary: string | null | undefined) {
+function isNonCollectionRun(sourceSummary: string | null | undefined) {
   if (!sourceSummary) return false;
   try {
-    return JSON.parse(sourceSummary).imported === true;
+    const summary = JSON.parse(sourceSummary) as { imported?: unknown; excelDailySync?: unknown };
+    return summary.imported === true || summary.excelDailySync === true;
   } catch {
     return false;
   }
@@ -58,10 +59,11 @@ export async function buildPublicHistoryResponse<Row extends PublicHistoryRow>(
   const syntheticRuns = [...new Map(
     rows
       .filter((row) => !knownRunIds.has(row.run_id))
+      .filter((row) => !row.run_id.startsWith("daily-history:"))
       .map((row) => [row.run_id, { id: row.run_id, fetched_at: row.fetched_at, success_count: 0, error_count: 0 }]),
   ).values()];
 
-  const latestCollectionRun = runs.results.find((run) => !isImportedRun(run.source_summary));
+  const latestCollectionRun = runs.results.find((run) => !isNonCollectionRun(run.source_summary));
   const publicRuns = [
     ...runs.results.map((run) => ({
       id: run.id,

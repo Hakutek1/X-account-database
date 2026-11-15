@@ -18,7 +18,7 @@ test("all data read routes enforce the selected read mode and stay read-only", a
     ["app/api/history/route.ts", "GET", "requireReadAccess"],
     ["app/api/avatar/route.ts", "GET", "requireReadAccess"],
   ];
-  const writes = /\b(?:ensureSchema|ensureSharedSession|ensureDailyHistory|ensureDailyPostsThroughToday|ensureOpeningDateHistory|ensureAccountStatuses|pruneSessionHistory|prepareEditorContext)\s*\(/;
+  const writes = /\b(?:ensureSchema|ensureSharedSession|ensureDailyHistory|ensureDailyPostsThroughToday|ensureOpeningDateHistory|ensureAccountStatuses|prepareEditorContext)\s*\(/;
   for (const [path, method, gate] of routes) {
     const body = methodBody(await source(path), method);
     assert.ok(body.includes(gate), `${path} must apply ${gate}`);

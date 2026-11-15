@@ -59,7 +59,10 @@ function pivotDailyMetricSheet(source: FreshExportRow[], metric: MetricKey): She
       latestFetchedAt: -Infinity, values: new Map<string, Value>(),
     };
     const current = account.values.get(bucket);
-    if (!current || order >= current.fetchedAt) account.values.set(bucket, { fetchedAt: order, value: row[metric] });
+    const metricValue = row[metric];
+    if (metricValue !== null && metricValue !== undefined && (!current || order >= current.fetchedAt)) {
+      account.values.set(bucket, { fetchedAt: order, value: metricValue });
+    }
     if (order >= account.latestFetchedAt) {
       account.handle = row.handle;
       account.displayName = row.displayName;
