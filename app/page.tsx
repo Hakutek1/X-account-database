@@ -339,7 +339,7 @@ async function requestCollect(handles: string[]): Promise<CollectResponse> {
 
   for (let attempt = 0; attempt < NETWORK_RETRY_COUNT; attempt += 1) {
     try {
-      const response = await fetch(`${window.location.origin}/api/collect`, {
+      const response = await fetch(`${window.location.origin}/api/update-stats`, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         credentials: "same-origin",
@@ -357,7 +357,7 @@ async function requestCollect(handles: string[]): Promise<CollectResponse> {
   }
 
   if (isNetworkFetchError(lastError)) {
-    throw new Error("サーバーとの通信に失敗しました。少し待ってからもう一度お試しください。");
+    throw new Error("取得APIへの通信がブラウザー側で遮断された可能性があります。拡張機能の通信制限を確認するか、ページを再読み込みしてからもう一度お試しください。");
   }
   throw lastError instanceof Error ? lastError : new Error("データ取得に失敗しました");
 }
