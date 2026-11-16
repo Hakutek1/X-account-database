@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import PreviewBanner from "./preview-banner";
 
 export const metadata: Metadata = {
   title: "複垢データベース | 複数アカウントの数字を追跡",
@@ -8,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="ja"><body>{children}</body></html>;
+  return <html lang="ja"><body><PreviewBanner />{children}</body></html>;
 }

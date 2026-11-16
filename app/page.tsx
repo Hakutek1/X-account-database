@@ -19,6 +19,7 @@ import { copyTextToClipboard } from "../lib/copy-to-clipboard";
 import { normalizeStoredStatusFilter } from "../lib/status-filter";
 
 const MAX_ACCOUNTS = 500;
+const IS_VERCEL_PREVIEW = import.meta.env.MODE === "vercel-preview";
 const numberFormatter = new Intl.NumberFormat("ja-JP");
 const compactNumberFormatter = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 });
 const chartDatePartFormatter = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -2028,6 +2029,10 @@ export default function Home() {
   };
 
   const updateSharedAccountTargets = async (action: "add" | "merge" | "remove", handles: string[] = [], handle?: string) => {
+    if (IS_VERCEL_PREVIEW) {
+      setAccountEditorFeedback("Vercelプレビューは合成データ専用のため、登録アカウントは変更できません。");
+      return false;
+    }
     if (!isAdmin || !accountTargetsSyncReady || isAccountTargetsSyncing) return false;
     setIsAccountTargetsSyncing(true);
     try {
@@ -2124,6 +2129,10 @@ export default function Home() {
   };
 
   const collect = async () => {
+    if (IS_VERCEL_PREVIEW) {
+      setNotice({ tone: "error", message: "Vercelプレビューではデータ取得できません。合成データのみ表示しています。" });
+      return;
+    }
     if (!isAdmin || !accountTargetsSyncReady || isAccountTargetsSyncing || isLoading || collectInFlight.current) return;
     const parsedTargets = normalizeStoredHandleTargets(accountInput);
     const handles = parsedTargets.handles;
@@ -2248,7 +2257,7 @@ export default function Home() {
             <div className="input-footer">
               <div className="input-actions">
                 <button type="button" className="secondary-button" onClick={openAccountEditor}>登録アカウントを編集</button>
-                <button type="button" className="primary-button" onClick={collect} disabled={isLoading || !accountTargetsSyncReady || isAccountTargetsSyncing}>{isLoading ? <><span className="button-spinner" />取得中…</> : isAccountTargetsSyncing ? <><span className="button-spinner" />共有中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button>
+                <button type="button" className="primary-button" onClick={collect} disabled={IS_VERCEL_PREVIEW || isLoading || !accountTargetsSyncReady || isAccountTargetsSyncing}>{isLoading ? <><span className="button-spinner" />取得中…</> : isAccountTargetsSyncing ? <><span className="button-spinner" />共有中…</> : <>データを取得する <span aria-hidden="true">↗</span></>}</button>
               </div>
             </div>
 
@@ -2279,6 +2288,7 @@ export default function Home() {
                     ref={accountEditorInputRef}
                     value={accountEditorDraft}
                     onChange={(event) => setAccountEditorDraft(event.target.value)}
+                    disabled={IS_VERCEL_PREVIEW}
                     placeholder="@openai, @xdevelopers"
                     rows={3}
                     aria-label="追加するハンドル名"
@@ -2286,7 +2296,7 @@ export default function Home() {
                 </label>
                 <div className="account-editor-add-row">
                   <span className="input-count">{accountTargetHandles.length} / {MAX_ACCOUNTS} 件登録済み</span>
-                  <button type="button" className="primary-button" onClick={() => void addAccountTargets()} disabled={!accountTargetsSyncReady || isAccountTargetsSyncing}>{isAccountTargetsSyncing ? <><span className="button-spinner" aria-hidden="true" />共有中…</> : "追加"}</button>
+                  <button type="button" className="primary-button" onClick={() => void addAccountTargets()} disabled={IS_VERCEL_PREVIEW || !accountTargetsSyncReady || isAccountTargetsSyncing}>{isAccountTargetsSyncing ? <><span className="button-spinner" aria-hidden="true" />共有中…</> : "追加"}</button>
                 </div>
                 <div className="account-target-heading">
                   <h3>登録アカウント一覧</h3>
@@ -2295,12 +2305,12 @@ export default function Home() {
                 </div>
                 {localOnlyAccountTargets.length > 0 && <div className="account-target-local-notice" role="status">
                   <span>この端末だけに保存されているアカウントが{localOnlyAccountTargets.length}件あります。共有一覧にはまだ追加されていません。</span>
-                  <button type="button" className="secondary-button" onClick={() => void mergeLocalOnlyAccountTargets()} disabled={!accountTargetsSyncReady || isAccountTargetsSyncing}>{isAccountTargetsSyncing ? "共有中…" : "この端末の未共有アカウントを共有一覧に追加"}</button>
+                  <button type="button" className="secondary-button" onClick={() => void mergeLocalOnlyAccountTargets()} disabled={IS_VERCEL_PREVIEW || !accountTargetsSyncReady || isAccountTargetsSyncing}>{isAccountTargetsSyncing ? "共有中…" : "この端末の未共有アカウントを共有一覧に追加"}</button>
                 </div>}
                 {accountTargetHandles.length ? <ul className="account-target-list" aria-label="取得対象アカウント">
                   {accountTargetHandles.map((handle) => <li className="account-target-chip" key={handle.toLowerCase()}>
                     <span>@{handle}</span>
-                    <button type="button" className="account-target-remove" aria-label={`@${handle}を取得対象から外す`} onClick={() => void removeAccountTarget(handle)} disabled={!accountTargetsSyncReady || isAccountTargetsSyncing}>×</button>
+                    <button type="button" className="account-target-remove" aria-label={`@${handle}を取得対象から外す`} onClick={() => void removeAccountTarget(handle)} disabled={IS_VERCEL_PREVIEW || !accountTargetsSyncReady || isAccountTargetsSyncing}>×</button>
                   </li>)}
                 </ul> : <p className="account-target-empty">登録済みアカウントはありません。</p>}
                 {accountEditorFeedback && <p className="account-editor-feedback" role="status">{accountEditorFeedback}</p>}

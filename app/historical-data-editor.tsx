@@ -8,6 +8,7 @@ import HistoricalNumberGrid from "./historical-number-grid";
 
 type MetricKey = "followers" | "following" | "posts";
 type AccountField = "accountId" | "handle" | "displayName" | "status" | "freezeDate";
+const IS_VERCEL_PREVIEW = import.meta.env.MODE === "vercel-preview";
 
 type EditorAccount = {
   key: string;
@@ -119,14 +120,14 @@ const HistoricalDataRow = memo(function HistoricalDataRow({ account, dates, metr
   isUploadingAvatar: boolean;
 }) {
   return <tr>
-    <td><input value={account.accountId} onChange={(event) => onUpdateAccount(account.key, "accountId", event.target.value)} aria-label={`${account.handle}のアカウントID`} /></td>
-    <td><input value={account.handle} onChange={(event) => onUpdateAccount(account.key, "handle", event.target.value)} aria-label={`${account.accountId}のハンドル名`} /></td>
-    <td><input value={account.displayName} onChange={(event) => onUpdateAccount(account.key, "displayName", event.target.value)} aria-label={`${account.accountId}の表示名`} /></td>
-    <td className="historical-status-cell"><select value={account.status} onChange={(event) => onUpdateAccount(account.key, "status", event.target.value)} aria-label={`${account.accountId}の活動状態`}>{ACCOUNT_STATUSES.map((status) => <option key={status} value={status}>{ACCOUNT_STATUS_LABELS[status]}</option>)}</select></td>
-    <td className="historical-freeze-date-cell"><input type="date" value={account.freezeDate} onChange={(event) => onUpdateAccount(account.key, "freezeDate", event.target.value)} aria-label={`${account.handle}の凍結日／垢削除日`} /></td>
-    <td className="historical-avatar-cell"><div className="historical-avatar-editor">{account.avatarUrl ? <ExternalAvatarImage src={account.avatarUrl} className="historical-avatar-preview" /> : <span className="historical-avatar-empty">未設定</span>}<label className="historical-avatar-upload"><input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAvatar(account, file); event.currentTarget.value = ""; }} disabled={isUploadingAvatar} /><span>{isUploadingAvatar ? "保存中…" : "画像を選択"}</span></label>{account.avatarUrl && <button type="button" className="historical-avatar-remove" onClick={() => onRemoveAvatar(account)} disabled={isUploadingAvatar}>削除</button>}</div></td>
+    <td><input value={account.accountId} disabled={IS_VERCEL_PREVIEW} onChange={(event) => onUpdateAccount(account.key, "accountId", event.target.value)} aria-label={`${account.handle}のアカウントID`} /></td>
+    <td><input value={account.handle} disabled={IS_VERCEL_PREVIEW} onChange={(event) => onUpdateAccount(account.key, "handle", event.target.value)} aria-label={`${account.accountId}のハンドル名`} /></td>
+    <td><input value={account.displayName} disabled={IS_VERCEL_PREVIEW} onChange={(event) => onUpdateAccount(account.key, "displayName", event.target.value)} aria-label={`${account.accountId}の表示名`} /></td>
+    <td className="historical-status-cell"><select value={account.status} onChange={(event) => onUpdateAccount(account.key, "status", event.target.value)} disabled={IS_VERCEL_PREVIEW} aria-label={`${account.accountId}の活動状態`}>{ACCOUNT_STATUSES.map((status) => <option key={status} value={status}>{ACCOUNT_STATUS_LABELS[status]}</option>)}</select></td>
+    <td className="historical-freeze-date-cell"><input type="date" value={account.freezeDate} onChange={(event) => onUpdateAccount(account.key, "freezeDate", event.target.value)} disabled={IS_VERCEL_PREVIEW} aria-label={`${account.handle}の凍結日／垢削除日`} /></td>
+    <td className="historical-avatar-cell"><div className="historical-avatar-editor">{account.avatarUrl ? <ExternalAvatarImage src={account.avatarUrl} className="historical-avatar-preview" /> : <span className="historical-avatar-empty">未設定</span>}<label className="historical-avatar-upload"><input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAvatar(account, file); event.currentTarget.value = ""; }} disabled={IS_VERCEL_PREVIEW || isUploadingAvatar} /><span>{isUploadingAvatar ? "保存中…" : "画像を選択"}</span></label>{account.avatarUrl && <button type="button" className="historical-avatar-remove" onClick={() => onRemoveAvatar(account)} disabled={IS_VERCEL_PREVIEW || isUploadingAvatar}>削除</button>}</div></td>
     {dates.map((date) => <td key={date}><input className="historical-number-input" readOnly data-account-key={account.key} data-date={date} type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} defaultValue={rowValues?.[date] ?? ""} onChange={(event) => onUpdateCell(account.key, date, event.target.value)} aria-label={`${account.accountId} ${displayDate(date)} ${metricLabels[metric]}`} /></td>)}
-    <td><button type="button" className="historical-row-delete" onClick={() => onRemove(account)}>行を削除</button></td>
+    <td><button type="button" className="historical-row-delete" onClick={() => onRemove(account)} disabled={IS_VERCEL_PREVIEW}>行を削除</button></td>
   </tr>;
 });
 
@@ -236,6 +237,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, [metric, load]);
 
   const updateAccount = useCallback((key: string, field: AccountField, value: string) => {
+    if (IS_VERCEL_PREVIEW) return;
     flushCellOperation();
     const previous = accountStateRef.current.find(account => account.key === key);
     const group = key + ":" + field;
@@ -254,6 +256,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, [flushCellOperation, pushUndo, replaceAccounts]);
 
   const updateCell = useCallback((accountKey: string, date: string, rawValue: string) => {
+    if (IS_VERCEL_PREVIEW) return;
     if (rawValue !== "" && !/^\d+$/.test(rawValue)) return;
     const value = rawValue === "" ? null : Number(rawValue);
     if (value !== null && !Number.isSafeInteger(value)) return;
@@ -263,6 +266,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, []);
 
   const addDate = () => {
+    if (IS_VERCEL_PREVIEW) return;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
       setError("日付はYYYY-MM-DD形式で入力してください。");
       return;
@@ -289,6 +293,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   };
 
   const removeDate = useCallback((date: string) => {
+    if (IS_VERCEL_PREVIEW) return;
     if (!window.confirm(`${displayDate(date)}の${metricLabels[metric]}データを削除しますか？`)) return;
     flushCellOperation();
     const removed = Object.entries(draftValuesRef.current).map(([key, row]) => ({ key, value: row[date] }));
@@ -311,6 +316,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, [metric, flushCellOperation, pushUndo, redrawValues]);
 
   const addAccount = () => {
+    if (IS_VERCEL_PREVIEW) return;
     const accountId = newAccount.accountId.trim();
     const handle = newAccount.handle.trim().replace(/^@/, "").toLowerCase();
     const displayName = newAccount.displayName.trim();
@@ -337,6 +343,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   };
 
   const removeAccount = useCallback((account: EditorAccount) => {
+    if (IS_VERCEL_PREVIEW) return;
     if (!window.confirm(`@${account.handle}をサイトと共有サーバーから完全に削除しますか？保存すると過去データ・取得履歴・アイコンが削除されます。保存前はCtrl／Command＋Zで戻せます。`)) return;
     flushCellOperation();
     const index = accountStateRef.current.findIndex(item => item.key === account.key);
@@ -356,6 +363,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, [flushCellOperation, pushUndo, redrawValues, replaceAccounts]);
 
   const uploadAvatar = useCallback(async (account: EditorAccount, file: File) => {
+    if (IS_VERCEL_PREVIEW) return;
     if (!isImageFile(file)) { setError("画像ファイルを選択してください。"); return; }
     setUploadingAvatarKey(account.key);
     setError(null);
@@ -379,6 +387,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, [onSaved, replaceAccounts]);
 
   const removeAvatar = useCallback(async (account: EditorAccount) => {
+    if (IS_VERCEL_PREVIEW) return;
     if (!window.confirm(`@${account.handle}の補填アイコンを削除しますか？`)) return;
     setUploadingAvatarKey(account.key);
     setError(null);
@@ -398,7 +407,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
   }, [onSaved, replaceAccounts]);
 
   const save = async () => {
-    if (isSaving || isLoading) return;
+    if (IS_VERCEL_PREVIEW || isSaving || isLoading) return;
     if (!window.confirm("保存しますか？")) return;
     flushCellOperation();
     const payload = {
@@ -449,7 +458,7 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
         <h2>全履歴編集</h2>
         <p className="historical-editor-help">Excelの日次履歴と同じ形式です。日付・アカウント・数値を管理者が編集できます。保存前はCtrl／Command＋Zで編集を戻せます。</p>
       </div>
-      <div className="historical-editor-actions"><button type="button" className="secondary-button" onClick={() => void load(metric)} disabled={editorBusy} aria-busy={isLoading}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "再読み込み"}</button><button type="button" className="primary-button" onClick={() => void save()} disabled={editorBusy} aria-busy={isSaving}>{isSaving ? <><span className="button-spinner" aria-hidden="true" />保存中…</> : "変更を保存"}</button></div>
+      <div className="historical-editor-actions"><button type="button" className="secondary-button" onClick={() => void load(metric)} disabled={editorBusy} aria-busy={isLoading}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "再読み込み"}</button><button type="button" className="primary-button" onClick={() => void save()} disabled={IS_VERCEL_PREVIEW || editorBusy} aria-busy={isSaving}>{isSaving ? <><span className="button-spinner" aria-hidden="true" />保存中…</> : "変更を保存"}</button></div>
     </div>
     <div className="historical-metric-tabs" role="tablist" aria-label="編集する指標" onKeyDown={(event) => handleMetricTabKeyDown(event, setMetric)}>
       {(Object.keys(metricLabels) as MetricKey[]).map((item) => <button key={item} id={"historical-metric-tab-" + item} type="button" role="tab" aria-selected={metric === item} aria-controls={"historical-metric-panel-" + item} tabIndex={metric === item ? 0 : -1} className={metric === item ? "is-active" : ""} onClick={() => setMetric(item)} disabled={editorBusy}>{metricLabels[item]}</button>)}
@@ -458,11 +467,11 @@ export default function HistoricalDataEditor({ onSaved }: { onSaved: () => Promi
     {error && <div className="notice notice-error" role="alert"><span>!</span>{error}</div>}
     {message && <div className="notice notice-success" role="status"><span>✓</span>{message}</div>}
     <div className="historical-editor-add-row">
-      <label><span>日付を追加</span><input type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} disabled={editorBusy} /></label><button type="button" className="secondary-button" onClick={addDate} disabled={editorBusy}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "日付を追加"}</button>
-      <div className="historical-account-add"><span>アカウントを追加</span><input value={newAccount.accountId} onChange={(event) => setNewAccount((current) => ({ ...current, accountId: event.target.value }))} placeholder="アカウントID" aria-label="新しいアカウントID" disabled={editorBusy} /><input value={newAccount.handle} onChange={(event) => setNewAccount((current) => ({ ...current, handle: event.target.value }))} placeholder="ハンドル名" aria-label="新しいハンドル名" disabled={editorBusy} /><input value={newAccount.displayName} onChange={(event) => setNewAccount((current) => ({ ...current, displayName: event.target.value }))} placeholder="表示名" aria-label="新しい表示名" disabled={editorBusy} /><button type="button" className="secondary-button" onClick={addAccount} disabled={editorBusy}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "追加"}</button></div>
+      <label><span>日付を追加</span><input type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} disabled={IS_VERCEL_PREVIEW || editorBusy} /></label><button type="button" className="secondary-button" onClick={addDate} disabled={IS_VERCEL_PREVIEW || editorBusy}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "日付を追加"}</button>
+      <div className="historical-account-add"><span>アカウントを追加</span><input value={newAccount.accountId} onChange={(event) => setNewAccount((current) => ({ ...current, accountId: event.target.value }))} placeholder="アカウントID" aria-label="新しいアカウントID" disabled={IS_VERCEL_PREVIEW || editorBusy} /><input value={newAccount.handle} onChange={(event) => setNewAccount((current) => ({ ...current, handle: event.target.value }))} placeholder="ハンドル名" aria-label="新しいハンドル名" disabled={IS_VERCEL_PREVIEW || editorBusy} /><input value={newAccount.displayName} onChange={(event) => setNewAccount((current) => ({ ...current, displayName: event.target.value }))} placeholder="表示名" aria-label="新しい表示名" disabled={IS_VERCEL_PREVIEW || editorBusy} /><button type="button" className="secondary-button" onClick={addAccount} disabled={IS_VERCEL_PREVIEW || editorBusy}>{isLoading ? <><span className="button-spinner historical-button-spinner" aria-hidden="true" />読み込み中…</> : "追加"}</button></div>
     </div>
-    {isLoading ? <div className="historical-editor-empty"><span className="button-spinner historical-loading-spinner" aria-hidden="true" />過去データを読み込んでいます…</div> : !accounts.length || !dates.length ? <div className="historical-editor-empty">編集するデータがありません。日付とアカウントを追加してください。</div> : <><p id="historical-grid-scroll-help" className="historical-scroll-hint">表は左右にスクロールできます。</p><HistoricalNumberGrid key={tableVersion + metric + dates.join(",") + accounts.map(account => account.key).join(",")} columns={dates.length} onUpdateCell={updateCell} onBeginOperation={flushCellOperation} onEndOperation={flushCellOperation}><div className="historical-grid-wrap" aria-describedby="historical-grid-scroll-help"><table key={tableVersion} className="historical-grid"><thead><tr><th>アカウントID</th><th>ハンドル名</th><th>表示名</th><th>活動状態</th><th>凍結日／垢削除日</th><th>補填アイコン</th>{dates.map((date) => <th key={date}><span>{displayDate(date)}</span><button type="button" className="historical-delete-button" onClick={() => removeDate(date)} aria-label={`${displayDate(date)}を削除`} disabled={editorBusy}>×</button></th>)}<th>行操作</th></tr></thead><tbody>{accounts.map((account) => <HistoricalDataRow key={account.key} account={account} dates={dates} metric={metric} rowValues={values[account.key]} onUpdateAccount={updateAccount} onUpdateCell={updateCell} onRemove={removeAccount} onUploadAvatar={uploadAvatar} onRemoveAvatar={removeAvatar} isUploadingAvatar={uploadingAvatarKey === account.key} />)}</tbody></table></div></HistoricalNumberGrid></>}
-    <div className="historical-editor-footnote">保存先：共有サーバーD1。Excelは保存後に「データ出力」を押すと最新状態で生成されます。日付列の削除は選択中の指標だけに適用されます。</div>
+    {isLoading ? <div className="historical-editor-empty"><span className="button-spinner historical-loading-spinner" aria-hidden="true" />過去データを読み込んでいます…</div> : !accounts.length || !dates.length ? <div className="historical-editor-empty">編集するデータがありません。日付とアカウントを追加してください。</div> : <><p id="historical-grid-scroll-help" className="historical-scroll-hint">表は左右にスクロールできます。</p><HistoricalNumberGrid key={tableVersion + metric + dates.join(",") + accounts.map(account => account.key).join(",")} columns={dates.length} onUpdateCell={updateCell} onBeginOperation={flushCellOperation} onEndOperation={flushCellOperation}><div className="historical-grid-wrap" aria-describedby="historical-grid-scroll-help"><table key={tableVersion} className="historical-grid"><thead><tr><th>アカウントID</th><th>ハンドル名</th><th>表示名</th><th>活動状態</th><th>凍結日／垢削除日</th><th>補填アイコン</th>{dates.map((date) => <th key={date}><span>{displayDate(date)}</span><button type="button" className="historical-delete-button" onClick={() => removeDate(date)} disabled={IS_VERCEL_PREVIEW || editorBusy} aria-label={`${displayDate(date)}を削除`}>×</button></th>)}<th>行操作</th></tr></thead><tbody>{accounts.map((account) => <HistoricalDataRow key={account.key} account={account} dates={dates} metric={metric} rowValues={values[account.key]} onUpdateAccount={updateAccount} onUpdateCell={updateCell} onRemove={removeAccount} onUploadAvatar={uploadAvatar} onRemoveAvatar={removeAvatar} isUploadingAvatar={uploadingAvatarKey === account.key} />)}</tbody></table></div></HistoricalNumberGrid></>}
+    <div className="historical-editor-footnote">{IS_VERCEL_PREVIEW ? "Vercelプレビューは合成データ専用です。編集・保存・削除は無効です。" : "保存先：共有サーバーD1。Excelは保存後に「データ出力」を押すと最新状態で生成されます。日付列の削除は選択中の指標だけに適用されます。"}</div>
     </div>
     {(Object.keys(metricLabels) as MetricKey[]).filter((item) => item !== metric).map((item) => <div key={item} id={"historical-metric-panel-" + item} role="tabpanel" aria-labelledby={"historical-metric-tab-" + item} hidden />)}
   </div>;

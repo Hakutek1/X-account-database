@@ -1,0 +1,4 @@
+{
+  "framework": "nitro",
+  "buildCommand": "npm run build:vercel-preview"
+}
