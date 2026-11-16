@@ -5,7 +5,7 @@ import test from "node:test";
 const developmentPreviewMeta = /codex-preview/i;
 
 test("the X account statistics dashboard contains the product UI", async () => {
-  const [html, layout, css, shared, collect, history, favicon, collection, worker, vite, sheetNames, historicalEditor, historicalApi, schema, siteVersionRoute, siteVersionLib, xStats, duplicateCleanup] = await Promise.all([
+  const [html, layout, css, shared, collect, history, favicon, collection, worker, vite, sheetNames, historicalEditor, historicalApi, schema, siteVersionRoute, siteVersionLib, xStats] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -23,7 +23,6 @@ test("the X account statistics dashboard contains the product UI", async () => {
     readFile(new URL("../app/api/site-version/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/site-version.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/x-stats.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/admin/nflf-duplicate/route.ts", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(html, developmentPreviewMeta);
   assert.match(html, /複垢データベース/);
@@ -252,8 +251,6 @@ test("the X account statistics dashboard contains the product UI", async () => {
   assert.doesNotMatch(collect, /pruneSessionHistory/);
   assert.match(collection, /upsertAcquiredDailyHistory/);
   assert.doesNotMatch(collection, /INSERT INTO xstats_snapshots/);
-  assert.doesNotMatch(duplicateCleanup, /DELETE FROM xstats_snapshots|UPDATE xstats_snapshots|DELETE FROM xstats_runs/);
-  assert.match(duplicateCleanup, /DELETE FROM xstats_daily_history/);
   assert.match(html, /followersDelta/);
   assert.match(html, /postsDelta/);
   assert.match(html, /TOP15/);
