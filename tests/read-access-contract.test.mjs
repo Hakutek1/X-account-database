@@ -7,7 +7,7 @@ async function source(path) {
 }
 
 test("the retired NFLF duplicate cleanup API is absent", async () => {
-  await assert.rejects(access(new URL("../app/api/admin/nflf-duplicate/route.ts", import.meta.url)));
+  await assert.rejects(access(new URL("../app/api/admin/nflf-duplicate/route.ts", import.meta.url)), { code: "ENOENT" });
 });
 
 function methodBody(contents, method) {
