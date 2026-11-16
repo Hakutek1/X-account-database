@@ -45,7 +45,7 @@ test("README explains shared D1 data and access modes for both hosting paths", a
   ]);
   assert.match(readme, /同じ登録アカウントと履歴を参照/);
   assert.match(readme, /XSTATS_READ_MODE=public/);
-  assert.match(readme, /OneDrive連携中はExcelファイル一覧/);
+  assert.doesNotMatch(`${readme}\n${workersGuide}\n${sitesGuide}`, /OneDrive|Microsoft連携|MICROSOFT_/i);
   assert.match(readme, /Cloudflare Workers＋D1/);
   assert.match(readme, /Codex Sites＋D1/);
   assert.match(workersGuide, /d1 migrations apply DB --remote/);

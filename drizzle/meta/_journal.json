@@ -120,6 +120,13 @@
       "when": 1794528000000,
       "tag": "0016_add_freeze_date",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1794844800000,
+      "tag": "0017_remove_microsoft_tokens",
+      "breakpoints": true
     }
   ]
 }

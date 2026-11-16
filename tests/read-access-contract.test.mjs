@@ -30,27 +30,37 @@ test("all data read routes enforce the selected read mode and stay read-only", a
   }
 });
 
-test("management and integration read routes remain administrator-only", async () => {
+test("management read routes remain administrator-only", async () => {
   const routes = [
     ["app/api/import/mappings/route.ts", "GET"],
     ["app/api/admin/historical-data/route.ts", "GET"],
-    ["app/api/microsoft/files/route.ts", "GET"],
-    ["app/api/microsoft/status/route.ts", "GET"],
   ];
   for (const [path, method] of routes) {
     assert.ok(methodBody(await source(path), method).includes("requireAdmin"), `${path} must stay administrator-only`);
   }
 });
 
-test("Microsoft read endpoints never refresh and persist tokens during GET", async () => {
-  const shared = await source("app/api/microsoft/_shared.ts");
-  assert.match(shared, /options: \{ readOnly\?: boolean \} = \{\}/);
-  assert.match(shared, /if \(readOnly\) return \{ session, config, error:[^\n]+refreshRequired: true \}/);
-  const status = await source("app/api/microsoft/status/route.ts");
-  const files = await source("app/api/microsoft/files/route.ts");
-  assert.match(methodBody(status, "GET"), /readOnly: true/);
-  assert.match(methodBody(files, "GET"), /readOnly: true/);
-  assert.doesNotMatch(methodBody(files, "GET"), /details:\s*payload/);
+test("Microsoft integration routes and token schema are retired by a scoped forward migration", async () => {
+  for (const path of [
+    "app/api/microsoft/_shared.ts",
+    "app/api/microsoft/callback/route.ts",
+    "app/api/microsoft/file/route.ts",
+    "app/api/microsoft/files/route.ts",
+    "app/api/microsoft/login/route.ts",
+    "app/api/microsoft/logout/route.ts",
+    "app/api/microsoft/status/route.ts",
+    "lib/microsoft-onedrive.ts",
+  ]) {
+    await assert.rejects(access(new URL(`../${path}`, import.meta.url)), { code: "ENOENT" });
+  }
+  const [schema, db, migration] = await Promise.all([
+    source("db/schema.ts"),
+    source("db/index.ts"),
+    source("drizzle/0017_remove_microsoft_tokens.sql"),
+  ]);
+  assert.doesNotMatch(schema, /xstats_microsoft_tokens|microsoftTokens|xstatsMicrosoftTokens/);
+  assert.doesNotMatch(db, /xstats_microsoft_tokens|microsoftTokens/);
+  assert.match(migration.trim(), /^DROP TABLE IF EXISTS xstats_microsoft_tokens;$/);
 });
 
 test("history removes unused identifiers and audit details from the public response", async () => {
@@ -81,20 +91,9 @@ test("all mutation handlers keep their administrator gate", async () => {
     ["app/api/admin/avatar/route.ts", "DELETE"],
     ["app/api/admin/historical-data/route.ts", "POST"],
     ["app/api/admin/historical-data/route.ts", "PUT"],
-    ["app/api/microsoft/file/route.ts", "POST"],
-    ["app/api/microsoft/file/route.ts", "PUT"],
   ];
   for (const [path, method] of routes) {
     const body = methodBody(await source(path), method);
-    assert.ok(body.includes("requireAdmin") || body.includes("requireMicrosoftConnection"), `${path} ${method} must stay protected`);
+    assert.ok(body.includes("requireAdmin"), `${path} ${method} must stay protected`);
   }
-});
-
-test("Microsoft OAuth callback checks the administrator before exchanging or saving tokens", async () => {
-  const callback = await source("app/api/microsoft/callback/route.ts");
-  const body = methodBody(callback, "GET");
-  const adminCheck = body.indexOf("isAdminRequest(request)");
-  assert.notEqual(adminCheck, -1, "OAuth callback must require the administrator cookie");
-  assert.ok(body.indexOf("exchangeAuthorizationCode") > adminCheck, "callback must authenticate before exchanging an authorization code");
-  assert.ok(body.indexOf("saveMicrosoftConnection") > adminCheck, "callback must authenticate before saving tokens");
 });

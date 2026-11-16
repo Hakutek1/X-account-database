@@ -143,18 +143,6 @@ export const xstatsImportIssues = sqliteTable("xstats_import_issues", {
   sessionIndex: index("xstats_import_issues_session_idx").on(table.sessionId, table.createdAt),
 }));
 
-/** Encrypted Microsoft OAuth tokens for the browser session that owns OneDrive editing. */
-export const xstatsMicrosoftTokens = sqliteTable("xstats_microsoft_tokens", {
-  sessionId: text("session_id").primaryKey(),
-  microsoftUserId: text("microsoft_user_id").notNull(),
-  email: text("email").notNull(),
-  displayName: text("display_name").notNull(),
-  accessToken: text("access_token").notNull(),
-  refreshToken: text("refresh_token").notNull(),
-  expiresAt: integer("expires_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-});
-
 export const schemaSql = {
   accountTargets: `CREATE TABLE IF NOT EXISTS xstats_account_targets (
     session_id TEXT PRIMARY KEY,
@@ -282,15 +270,4 @@ export const schemaSql = {
     FOREIGN KEY (session_id) REFERENCES xstats_sessions(id)
   )`,
   importIssuesIndex: `CREATE INDEX IF NOT EXISTS xstats_import_issues_session_idx ON xstats_import_issues(session_id, created_at DESC)`,
-  microsoftTokens: `CREATE TABLE IF NOT EXISTS xstats_microsoft_tokens (
-    session_id TEXT PRIMARY KEY,
-    microsoft_user_id TEXT NOT NULL,
-    email TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    access_token TEXT NOT NULL,
-    refresh_token TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES xstats_sessions(id)
-  )`,
 };

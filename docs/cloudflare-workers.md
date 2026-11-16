@@ -34,9 +34,7 @@ npx wrangler d1 create x-account-database
 npx wrangler secret put XSTATS_ADMIN_KEY
 ```
 
-`wrangler.jsonc` の `vars.XSTATS_READ_MODE` は初期値の `private` のままにすることを推奨します。`public` に変更すると、Xアカウントや履歴などの読み取りAPIを誰でも使えるようになります。OneDriveを接続した場合はExcelファイル一覧の情報も読み取り可能です。書き込み操作は常に管理者ログインが必要です。
-
-OneDrive連携を使う場合は、Microsoft Entra IDでアプリを登録し、Client ID、Client Secret、許可する管理者、暗号化キー、コールバックURLを設定します。Client Secret、管理者メールまたはID、`MICROSOFT_TOKEN_ENCRYPTION_KEY` はSecretsとして管理してください。`MICROSOFT_REDIRECT_URI` を指定する場合は、`https://<サイトのホスト名>/api/microsoft/callback` とMicrosoft側の登録値を一致させます。OneDriveを使わない場合、この設定は不要です。
+`wrangler.jsonc` の `vars.XSTATS_READ_MODE` は初期値の `private` のままにすることを推奨します。`public` に変更すると、Xアカウントや履歴などの読み取りAPIを誰でも使えるようになります。書き込み操作は常に管理者ログインが必要です。
 
 ## 4. マイグレーションとデプロイ
 
@@ -53,7 +51,7 @@ npm run deploy
 
 ## 5. バックアップ
 
-D1名を置き換えて、定期的にSQLを書き出します。バックアップにはアカウント情報、履歴、OneDrive連携情報が含まれる場合があるため、リポジトリ外の安全な場所に保管してください。
+D1名を置き換えて、定期的にSQLを書き出します。バックアップにはアカウント情報や履歴が含まれるため、リポジトリ外の安全な場所に保管してください。
 
 ```bash
 mkdir -p ../x-account-database-backups
