@@ -44,13 +44,20 @@ assert.equal(status.body.isAdmin, false);
 assert.equal(status.body.configured, true);
 assert.equal((await request("/api/site-version")).response.status, 200);
 
+for (const method of ["GET", "POST"]) {
+  const { response, body } = await request("/api/admin/nflf-duplicate", {
+    method,
+    ...(method === "POST" ? { body: {} } : {}),
+  });
+  assert.equal(response.status, 404, `retired NFLF cleanup API ${method} must be absent: ${JSON.stringify(body)}`);
+}
+
 const reads = [
   { path: "/api/history", publicStatus: 200 },
   { path: "/api/avatar?accountId=missing-read-test", publicStatus: 404 },
   { path: "/api/import/mappings", publicStatus: 200, adminOnly: true },
   { path: "/api/admin/historical-data?metric=followers", publicStatus: 200, adminOnly: true },
   { path: "/api/admin/account-targets", publicStatus: 200, adminOnly: true },
-  { path: "/api/admin/nflf-duplicate", publicStatus: 200, adminOnly: true },
   { path: "/api/microsoft/status", publicStatus: 200, adminOnly: true },
   { path: "/api/microsoft/files", publicStatus: 503, adminOnly: true },
 ];
@@ -85,7 +92,6 @@ const protectedWrites = [
   { path: "/api/admin/avatar", method: "DELETE", body: {} },
   { path: "/api/admin/historical-data", method: "POST", body: {} },
   { path: "/api/admin/historical-data", method: "PUT", body: {} },
-  { path: "/api/admin/nflf-duplicate", method: "POST", body: {} },
   { path: "/api/microsoft/file", method: "POST", body: {} },
   { path: "/api/microsoft/file", method: "PUT", body: {} },
   { path: "/api/microsoft/logout", method: "POST", body: {} },

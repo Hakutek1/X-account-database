@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
+
+test("the retired NFLF duplicate cleanup API is absent", async () => {
+  await assert.rejects(access(new URL("../app/api/admin/nflf-duplicate/route.ts", import.meta.url)), { code: "ENOENT" });
+});
 
 function methodBody(contents, method) {
   const start = contents.indexOf(`export async function ${method}(`);
@@ -30,7 +34,6 @@ test("management and integration read routes remain administrator-only", async (
   const routes = [
     ["app/api/import/mappings/route.ts", "GET"],
     ["app/api/admin/historical-data/route.ts", "GET"],
-    ["app/api/admin/nflf-duplicate/route.ts", "GET"],
     ["app/api/microsoft/files/route.ts", "GET"],
     ["app/api/microsoft/status/route.ts", "GET"],
   ];
@@ -78,7 +81,6 @@ test("all mutation handlers keep their administrator gate", async () => {
     ["app/api/admin/avatar/route.ts", "DELETE"],
     ["app/api/admin/historical-data/route.ts", "POST"],
     ["app/api/admin/historical-data/route.ts", "PUT"],
-    ["app/api/admin/nflf-duplicate/route.ts", "POST"],
     ["app/api/microsoft/file/route.ts", "POST"],
     ["app/api/microsoft/file/route.ts", "PUT"],
   ];
