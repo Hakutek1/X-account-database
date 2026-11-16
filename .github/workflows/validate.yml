@@ -69,9 +69,9 @@ jobs:
           SQL
           npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-before.jsonc" --persist-to "$persist" --file "$RUNNER_TEMP/seed.sql"
           npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist"
-          output="$(npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist" --command "SELECT 'removed:xstats_schedules:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_schedules') || '|removed:xstats_watchlist:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_watchlist') || '|status:retained-account:' || COALESCE((SELECT status || ':' || joined_at FROM xstats_account_statuses WHERE session_id='d1-removal-test' AND account_id='retained-account'), 'missing') || '|history:' || (SELECT COUNT(*) FROM xstats_daily_history WHERE id='history-row-1' AND account_id='history-account' AND date='2020-01-02') || '|columns:avatar_url:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_snapshots') WHERE name='avatar_url') || ':avatar_data:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_account_assets') WHERE name='avatar_data') || '|account_targets:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_account_targets') || '|tables:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('xstats_sessions','xstats_runs','xstats_snapshots','xstats_account_statuses','xstats_daily_history','xstats_daily_history_meta','xstats_historical_account_exclusions','xstats_account_assets','xstats_import_mappings','xstats_import_issues','xstats_microsoft_tokens','xstats_account_targets')) AS result")"
+          output="$(npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-after.jsonc" --persist-to "$persist" --command "SELECT 'removed:xstats_schedules:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_schedules') || '|removed:xstats_watchlist:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_watchlist') || '|status:retained-account:' || COALESCE((SELECT status || ':' || joined_at FROM xstats_account_statuses WHERE session_id='d1-removal-test' AND account_id='retained-account'), 'missing') || '|history:' || (SELECT COUNT(*) FROM xstats_daily_history WHERE id='history-row-1' AND account_id='history-account' AND date='2020-01-02') || '|columns:avatar_url:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_snapshots') WHERE name='avatar_url') || ':avatar_data:' || (SELECT COUNT(*) FROM pragma_table_info('xstats_account_assets') WHERE name='avatar_data') || '|account_targets:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='xstats_account_targets') || '|tables:' || (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('xstats_sessions','xstats_runs','xstats_snapshots','xstats_account_statuses','xstats_daily_history','xstats_daily_history_meta','xstats_historical_account_exclusions','xstats_account_assets','xstats_import_mappings','xstats_import_issues','xstats_account_targets')) AS result")"
           printf '%s\n' "$output"
-          for expected in 'removed:xstats_schedules:0' 'removed:xstats_watchlist:0' 'status:retained-account:suspended:2020-01-02' 'history:1' 'columns:avatar_url:1:avatar_data:1' 'account_targets:1' 'tables:12'; do
+          for expected in 'removed:xstats_schedules:0' 'removed:xstats_watchlist:0' 'status:retained-account:suspended:2020-01-02' 'history:1' 'columns:avatar_url:1:avatar_data:1' 'account_targets:1' 'tables:11'; do
             printf '%s' "$output" | grep -F "$expected" >/dev/null || { echo "Missing D1 verification result: $expected"; exit 1; }
           done
       - name: Verify additive freeze-date migration preserves existing data
@@ -149,15 +149,11 @@ jobs:
             npx wrangler d1 execute DB --local --config "$RUNNER_TEMP/wrangler-api-test.jsonc" --persist-to "$persist" --command "$1"
           }
           npx wrangler d1 migrations apply DB --local --config "$RUNNER_TEMP/wrangler-api-test.jsonc" --persist-to "$persist"
-          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) || '|' || (SELECT COUNT(*) FROM xstats_account_targets) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0|0'
+          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_account_targets) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0'
           cat > .dev.vars <<EOF
           SITE_VERSION_NUMBER=105
           SITE_SOURCE_COMMIT=$SOURCE_COMMIT
           XSTATS_ADMIN_KEY=preview-only-key
-          MICROSOFT_CLIENT_ID=preview-client-id
-          MICROSOFT_CLIENT_SECRET=preview-client-secret
-          MICROSOFT_OWNER_EMAIL=owner@example.invalid
-          MICROSOFT_TOKEN_ENCRYPTION_KEY=preview-only-token-encryption-key
           EOF
           server_pid=""
           stop_server() {
@@ -187,7 +183,7 @@ jobs:
             cat "$RUNNER_TEMP/xstats-dev-private.log"
             exit 1
           fi
-          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) || '|' || (SELECT COUNT(*) FROM xstats_account_targets) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0|0'
+          run_d1 "SELECT 'EMPTY|' || (SELECT COUNT(*) FROM xstats_sessions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history_meta) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_account_targets) AS result" | grep -F 'EMPTY|0|0|0|0|0|0|0|0|0|0|0'
           APP_URL=http://127.0.0.1:4173 node .github/scripts/test-read-api-access.mjs private prepare
           run_d1 "SELECT 'PREPARED|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) AS result" | grep -F 'PREPARED|0|0|0|0'
           run_d1 "UPDATE xstats_sessions SET last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = 'xstats-public-shared'"
@@ -197,10 +193,6 @@ jobs:
           SITE_VERSION_NUMBER=105
           SITE_SOURCE_COMMIT=$SOURCE_COMMIT
           XSTATS_ADMIN_KEY=preview-only-key
-          MICROSOFT_CLIENT_ID=preview-client-id
-          MICROSOFT_CLIENT_SECRET=preview-client-secret
-          MICROSOFT_OWNER_EMAIL=owner@example.invalid
-          MICROSOFT_TOKEN_ENCRYPTION_KEY=preview-only-token-encryption-key
           XSTATS_READ_MODE=public
           EOF
           start_server public 4174
@@ -210,7 +202,7 @@ jobs:
           PREVIEW_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/preview-screenshots.mjs
           APP_URL=http://127.0.0.1:4174 node .github/scripts/test-editor-undo.mjs
           APP_URL=http://127.0.0.1:4174 node .github/scripts/test-lifecycle-projection.mjs
-          run_d1 "SELECT 'READ_ONLY|' || (SELECT last_seen_at FROM xstats_sessions WHERE id = 'xstats-public-shared') || '|' || (SELECT updated_at FROM xstats_daily_history_meta WHERE session_id = 'xstats-public-shared') || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_microsoft_tokens) || '|' || (SELECT COUNT(*) FROM xstats_account_targets) AS result" | grep -F 'READ_ONLY|2000-01-01T00:00:00.000Z|2000-01-01T00:00:00.000Z|0|0|0|0|0|0|0|0|0|0'
+          run_d1 "SELECT 'READ_ONLY|' || (SELECT last_seen_at FROM xstats_sessions WHERE id = 'xstats-public-shared') || '|' || (SELECT updated_at FROM xstats_daily_history_meta WHERE session_id = 'xstats-public-shared') || '|' || (SELECT COUNT(*) FROM xstats_runs) || '|' || (SELECT COUNT(*) FROM xstats_snapshots) || '|' || (SELECT COUNT(*) FROM xstats_daily_history) || '|' || (SELECT COUNT(*) FROM xstats_historical_account_exclusions) || '|' || (SELECT COUNT(*) FROM xstats_account_statuses) || '|' || (SELECT COUNT(*) FROM xstats_account_assets) || '|' || (SELECT COUNT(*) FROM xstats_import_mappings) || '|' || (SELECT COUNT(*) FROM xstats_import_issues) || '|' || (SELECT COUNT(*) FROM xstats_account_targets) AS result" | grep -F 'READ_ONLY|2000-01-01T00:00:00.000Z|2000-01-01T00:00:00.000Z|0|0|0|0|0|0|0|0|0'
           APP_URL=http://127.0.0.1:4174 SCREENSHOT_DIR="$RUNNER_TEMP/xstats-preview" node .github/scripts/test-account-target-sync.mjs
           cat > "$RUNNER_TEMP/seed-historical-save.sql" <<'SQL'
           WITH RECURSIVE days(i, date_value) AS (

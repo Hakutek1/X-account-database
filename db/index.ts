@@ -40,7 +40,6 @@ export async function ensureSchema(database: D1Database = getD1()) {
     db.prepare(schemaSql.importMappingsUnique),
     db.prepare(schemaSql.importIssues),
     db.prepare(schemaSql.importIssuesIndex),
-    db.prepare(schemaSql.microsoftTokens),
   ]);
   // Existing production databases were created before avatar_url existed.
   // D1 has no portable IF NOT EXISTS form for ADD COLUMN, so treat the

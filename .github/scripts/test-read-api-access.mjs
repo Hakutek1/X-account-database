@@ -52,14 +52,26 @@ for (const method of ["GET", "POST"]) {
   assert.equal(response.status, 404, `retired NFLF cleanup API ${method} must be absent: ${JSON.stringify(body)}`);
 }
 
+for (const [path, method] of [
+  ["/api/microsoft/status", "GET"],
+  ["/api/microsoft/files", "GET"],
+  ["/api/microsoft/file", "GET"],
+  ["/api/microsoft/file", "POST"],
+  ["/api/microsoft/file", "PUT"],
+  ["/api/microsoft/login", "GET"],
+  ["/api/microsoft/logout", "POST"],
+  ["/api/microsoft/callback?code=unused&state=unused", "GET"],
+]) {
+  const { response } = await request(path, { method });
+  assert.equal(response.status, 404, `retired Microsoft integration endpoint ${method} ${path} must be absent`);
+}
+
 const reads = [
   { path: "/api/history", publicStatus: 200 },
   { path: "/api/avatar?accountId=missing-read-test", publicStatus: 404 },
   { path: "/api/import/mappings", publicStatus: 200, adminOnly: true },
   { path: "/api/admin/historical-data?metric=followers", publicStatus: 200, adminOnly: true },
   { path: "/api/admin/account-targets", publicStatus: 200, adminOnly: true },
-  { path: "/api/microsoft/status", publicStatus: 200, adminOnly: true },
-  { path: "/api/microsoft/files", publicStatus: 503, adminOnly: true },
 ];
 
 for (const item of reads) {
@@ -75,11 +87,6 @@ for (const item of reads) {
       assert.equal("importIssues" in body, false);
       assert.ok(body.runs?.every((run) => !("source_summary" in run)), "history must not expose internal import metadata");
     }
-    if (item.path === "/api/microsoft/status" && mode === "public") {
-      assert.equal(body.configured, true);
-      assert.equal(body.connected, false);
-      assert.equal(body.user, null);
-    }
   }
 }
 
@@ -92,26 +99,12 @@ const protectedWrites = [
   { path: "/api/admin/avatar", method: "DELETE", body: {} },
   { path: "/api/admin/historical-data", method: "POST", body: {} },
   { path: "/api/admin/historical-data", method: "PUT", body: {} },
-  { path: "/api/microsoft/file", method: "POST", body: {} },
-  { path: "/api/microsoft/file", method: "PUT", body: {} },
-  { path: "/api/microsoft/logout", method: "POST", body: {} },
 ];
 for (const item of protectedWrites) {
   const { response, body } = await request(item.path, item);
   assert.ok(response.status === 401 || response.status === 403, `${mode} anonymous mutation ${item.method} ${item.path} unexpectedly returned ${response.status}: ${JSON.stringify(body)}`);
 }
-const microsoftLogin = await request("/api/microsoft/login");
-assert.equal(microsoftLogin.response.status, 403, "OAuth initiation remains administrator-only");
-const anonymousCallback = await request("/api/microsoft/callback?code=must-not-be-used&state=must-not-be-used");
-assert.equal(anonymousCallback.response.status, 302, "OAuth callback requires an administrator session");
-const anonymousCallbackUrl = new URL(anonymousCallback.response.headers.get("location"), base);
-assert.equal(anonymousCallbackUrl.searchParams.get("message"), "管理者のみMicrosoft連携を利用できます。");
-
 const cookie = await adminCookie();
-const invalidCallback = await request("/api/microsoft/callback?code=must-not-be-used&state=must-not-be-used", { cookie });
-assert.equal(invalidCallback.response.status, 302, "OAuth callback must validate state before exchanging a code");
-const invalidCallbackUrl = new URL(invalidCallback.response.headers.get("location"), base);
-assert.equal(invalidCallbackUrl.searchParams.get("message"), "Microsoft認証の確認に失敗しました。もう一度接続してください。");
 for (const item of reads) {
   const { response, body } = await request(item.path, { cookie });
   assert.equal(response.status, item.publicStatus, `authenticated GET ${item.path}: ${JSON.stringify(body)}`);
